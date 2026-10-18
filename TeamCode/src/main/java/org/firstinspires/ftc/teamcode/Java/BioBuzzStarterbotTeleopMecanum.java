@@ -211,10 +211,10 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          */
         intakePower = gamepad2.right_trigger - gamepad2.left_trigger;
         if (gamepad2.dpad_right) {
-            LAUNCHER_TARGET_VELOCITY+=50;
+            LAUNCHER_TARGET_VELOCITY+=2;
         }
         if (gamepad2.dpad_left) {
-            LAUNCHER_TARGET_VELOCITY -= 50;
+            LAUNCHER_TARGET_VELOCITY -= 2;
         }
 
         launch();
@@ -236,6 +236,8 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          */
         telemetry.addData("Motors", "left (%.2f), right (%.2f)", leftFrontPower, rightFrontPower);
         telemetry.addData("Triggers", "left (%.2f, right (%.2f)",gamepad2.left_trigger, gamepad2.right_trigger);
+        telemetry.addData("speed", "left (%.2f, right (%.2f)",(double) LAUNCHER_TARGET_VELOCITY,(double) LAUNCHER_TARGET_VELOCITY);
+
     }
 
     /*
