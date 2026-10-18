@@ -73,7 +73,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
      * in the launch() function to only run the windmill servo when the motor is spinning fast
      * enough to make a successful throw.
      */
-    public final int LAUNCHER_TARGET_VELOCITY = 1250; //2678 RPM
+    public int LAUNCHER_TARGET_VELOCITY = 1250; //2678 RPM
     public final int LAUNCHER_MIN_VELOCITY = 1000; //2571 RPM
 
 
@@ -210,10 +210,16 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          * create erratic behavior.
          */
         intakePower = gamepad2.right_trigger - gamepad2.left_trigger;
+        if (gamepad2.dpad_right) {
+            LAUNCHER_TARGET_VELOCITY+=50;
+        }
+        if (gamepad2.dpad_left) {
+            LAUNCHER_TARGET_VELOCITY -= 50;
+        }
 
         launch();
 
-        /*
+                    /*
          * Here we set our intake motor and servos to their intake power. The order of operations
          * here is important though. The gamepad triggers define the starting point for the intake
          * power variable in each loop of our code, but inside our launch function we also sometimes
