@@ -71,7 +71,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
      * no load (2800 ticks/s = 6000 RPM). With the flywheel on it tops out a bit below that.
      */
     final int LAUNCHER_MAX_VELOCITY = 2800;
-    public int launcherTargetVelocity = 1250;
+    public int launcherTargetVelocity = 1225;
     public final int LAUNCHER_MIN_VELOCITY = 1000;
 
     // How close (in ticks/s) the launcher must be to the target to count as "at speed".
@@ -84,8 +84,8 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
     boolean dpadRightWasDown = false;
     boolean dpadLeftWasDown = false;
 
-    // Tracks whether the launcher was at speed last loop, so we only rumble once when it gets there.
-    boolean launcherWasAtSpeed = false;
+    // Whether the launcher is at its target velocity, updated every loop in launch().
+    boolean launcherAtSpeed = false;
 
 
     /*
@@ -235,9 +235,9 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
 
         /*
          * Launcher status, shown first so it's at the top of the Driver Station screen.
-         * launcherWasAtSpeed was just updated inside launch(), so it reflects this loop.
+         * launcherAtSpeed was just updated inside launch(), so it reflects this loop.
          */
-        telemetry.addData("Shooter", launcherWasAtSpeed ? "READY TO FIRE" : "NOT READY");
+        telemetry.addData("Shooter", launcherAtSpeed ? "READY TO FIRE" : "NOT READY");
         telemetry.addData("Target velocity", "%d ticks/s", launcherTargetVelocity);
         telemetry.addData("Actual velocity", "%.0f ticks/s", launcher.getVelocity());
 
@@ -298,16 +298,8 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         // Keep the launcher spinning at the target velocity the whole time teleop is running.
         launcher.setVelocity(launcherTargetVelocity);
 
-        /*
-         * When the launcher reaches its target velocity, rumble both controllers once and show
-         * it on the Driver Station so the drivers know it's ready to shoot.
-         */
-        boolean launcherAtSpeed = Math.abs(launcher.getVelocity() - launcherTargetVelocity) <= LAUNCHER_VELOCITY_TOLERANCE;
-        if (launcherAtSpeed && !launcherWasAtSpeed) {
-            gamepad1.rumble(300);
-            gamepad2.rumble(300);
-        }
-        launcherWasAtSpeed = launcherAtSpeed;
+        // Check whether the launcher is at its target velocity (shown on telemetry as ready/not ready).
+        launcherAtSpeed = Math.abs(launcher.getVelocity() - launcherTargetVelocity) <= LAUNCHER_VELOCITY_TOLERANCE;
 
         /*
          * Here we ask if the driver is currently pressing the right bumper, AND the launcher is

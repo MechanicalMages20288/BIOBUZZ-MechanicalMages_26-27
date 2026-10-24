@@ -64,7 +64,7 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
      * Launcher speeds in encoder ticks per second (same units as the teleop).
      * 1250 ticks/s is about 2680 RPM.
      */
-    public final int LAUNCHER_TARGET_VELOCITY = 1250;
+    public final int LAUNCHER_TARGET_VELOCITY = 1225;
     public final int LAUNCHER_MIN_VELOCITY = 1200;
 
     /*
@@ -84,25 +84,19 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
     final double LAUNCH_SECONDS = 10;
 
     /*
-     * Park path. Start: back against your alliance wall, on the tile level with the hive cell
-     * FARTHER from your loading zone, facing the hive. The loading zone is then about 2 tiles
-     * (~48 in) to the robot's LEFT along the same wall, for both red and blue (the field is
-     * mirrored), so the same path works for either alliance.
+     * Park path, after launching:
+     *   1. STRAIGHT:    drive straight at 0.9 power for 2.3 seconds.
+     *   2. STRAFE_LEFT: strafe left for 3 seconds.
      *
-     *   1. LEAVE_WALL:   drive forward a few inches so the robot doesn't scrape the wall.
-     *   2. STRAFE_LEFT:  strafe left ~48 in, to line up with the loading zone.
-     *   3. BACK_TO_WALL: drive backward into the loading zone until the back hits the wall.
-     *
-     * These are timed guesses, assuming 312 RPM drive motors and a full battery. Tune them on
-     * the field: STRAFE_LEFT_SECONDS matters most. BACK_TO_WALL can run a little long, since
-     * the wall just stops the robot.
+     * Directions here are as seen on the field. In testing, the robot moved opposite to the
+     * code's "forward" and "left", so STRAIGHT uses negative drive power and STRAFE_LEFT uses
+     * positive strafe power. If a move goes the wrong way, flip the sign of its power.
+     * Timed moves depend on battery charge and floor grip, so tune the seconds on the field.
      */
-    final double LEAVE_WALL_POWER = 0.3;
-    final double LEAVE_WALL_SECONDS = 0.25;
-    final double STRAFE_LEFT_POWER = -0.4; // negative = left
-    final double STRAFE_LEFT_SECONDS = 2.4;
-    final double BACK_TO_WALL_POWER = -0.3;
-    final double BACK_TO_WALL_SECONDS = 0.6;
+    final double STRAIGHT_POWER = -0.9;
+    final double STRAIGHT_SECONDS = 2.3;
+    final double STRAFE_LEFT_POWER = 0.4;
+    final double STRAFE_LEFT_SECONDS = 3;
 
     double intakePower = 0;
 
@@ -124,9 +118,8 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
 
     private enum AutonomousState {
         LAUNCH,
-        LEAVE_WALL,
+        STRAIGHT,
         STRAFE_LEFT,
-        BACK_TO_WALL,
         COMPLETE
     }
 
@@ -199,21 +192,16 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
                 if (autoTimer.seconds() > LAUNCH_SECONDS) {
                     launch(false);
                     intakePower = 0;
-                    autonomousState = AutonomousState.LEAVE_WALL;
+                    autonomousState = AutonomousState.STRAIGHT;
                 }
                 break;
-            case LEAVE_WALL:
-                if (drive(LEAVE_WALL_POWER, LEAVE_WALL_SECONDS)) {
+            case STRAIGHT:
+                if (drive(STRAIGHT_POWER, STRAIGHT_SECONDS)) {
                     autonomousState = AutonomousState.STRAFE_LEFT;
                 }
                 break;
             case STRAFE_LEFT:
                 if (strafe(STRAFE_LEFT_POWER, STRAFE_LEFT_SECONDS)) {
-                    autonomousState = AutonomousState.BACK_TO_WALL;
-                }
-                break;
-            case BACK_TO_WALL:
-                if (drive(BACK_TO_WALL_POWER, BACK_TO_WALL_SECONDS)) {
                     autonomousState = AutonomousState.COMPLETE;
                 }
                 break;
