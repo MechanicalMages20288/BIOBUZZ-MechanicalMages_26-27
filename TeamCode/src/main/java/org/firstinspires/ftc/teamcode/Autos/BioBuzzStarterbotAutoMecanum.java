@@ -58,14 +58,14 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 
 @Autonomous(name = "Mec BioBuzz StarterBot Auto", group = "StarterBot")
 //@Disabled
-public class BioBuzzStarterbotAutoMecanum extends OpMode {
+public class  BioBuzzStarterbotAutoMecanum extends OpMode {
 
     /*
      * Launcher speeds in encoder ticks per second (same units as the teleop).
      * 1250 ticks/s is about 2680 RPM.
      */
-    public final int LAUNCHER_TARGET_VELOCITY = 1225;
-    public final int LAUNCHER_MIN_VELOCITY = 1200;
+    public final int LAUNCHER_TARGET_VELOCITY = 1200;
+    public final int LAUNCHER_MIN_VELOCITY = 1150;
 
     /*
      * Start feeding once the launcher is at speed, OR after this many seconds of spin-up,
@@ -94,7 +94,7 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
      * Timed moves depend on battery charge and floor grip, so tune the seconds on the field.
      */
     final double STRAIGHT_POWER = -0.9;
-    final double STRAIGHT_SECONDS = 2.3;
+    final double STRAIGHT_SECONDS = 2              ;
     final double STRAFE_LEFT_POWER = 0.4;
     final double STRAFE_LEFT_SECONDS = 3;
 
