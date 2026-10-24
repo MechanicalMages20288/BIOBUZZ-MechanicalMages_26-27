@@ -8,12 +8,3 @@ pluginManagement {
 
 include ':FtcRobotController'
 include ':TeamCode'
-
-includeBuild('PedroPathing') {
-    dependencySubstitution {
-        substitute module('PedroPathing:core') using project(':core')
-        substitute module('PedroPathing:revhub') using project(':revhub')
-        substitute module('com.pedropathing:core') using project(':core')
-        substitute module('com.pedropathing:revhub') using project(':revhub')
-    }
-}

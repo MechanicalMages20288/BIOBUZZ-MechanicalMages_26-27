@@ -64,20 +64,25 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
 
 
     /*
-     * These two variables are used to control the velocity of the launcher motor.
-     * They are both in encoder ticks per second. The motors we use in the FIRST Tech Challenge
-     * have encoders with a resolution of 28 ticks per revolution. We can convert this to RPM
-     * by dividing the value by 28, to get to revolutions per second, before multiplying by 60
-     * to get revolutions per minute.
-     * We pass the target velocity variable to our motor to set the goal. We use the min velocity
-     * in the launch() function to only run the windmill servo when the motor is spinning fast
-     * enough to make a successful throw.
+     * Launcher speeds, all in encoder ticks per second. The encoder counts 28 ticks per motor
+     * revolution, so RPM = ticks/s * 60 / 28 (1250 ticks/s is about 2680 RPM).
+     *
+     * LAUNCHER_MAX_VELOCITY is about the fastest a goBILDA 6000 RPM (1:1) motor can spin with
+     * no load (2800 ticks/s = 6000 RPM). With the flywheel on it tops out a bit below that.
      */
-    public int LAUNCHER_TARGET_VELOCITY = 1250; //2678 RPM
-    public final int LAUNCHER_MIN_VELOCITY = 1000; //2571 RPM
+    final int LAUNCHER_MAX_VELOCITY = 2800;
+    public int launcherTargetVelocity = 1250;
+    public final int LAUNCHER_MIN_VELOCITY = 1000;
 
-    // How close (in ticks per second) the launcher must be to the target to count as "at speed".
+    // How close (in ticks/s) the launcher must be to the target to count as "at speed".
     public final int LAUNCHER_VELOCITY_TOLERANCE = 50;
+
+    // Each tap of d-pad right/left changes the target by this many ticks/s.
+    public final int LAUNCHER_VELOCITY_STEP = 25;
+
+    // Last loop's d-pad state, so one tap changes the target once.
+    boolean dpadRightWasDown = false;
+    boolean dpadLeftWasDown = false;
 
     // Tracks whether the launcher was at speed last loop, so we only rumble once when it gets there.
     boolean launcherWasAtSpeed = false;
@@ -216,14 +221,25 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          * create erratic behavior.
          */
         intakePower = gamepad2.right_trigger - gamepad2.left_trigger;
-        if (gamepad2.dpad_right) {
-            LAUNCHER_TARGET_VELOCITY+=2;
+        // Tap d-pad right/left to raise/lower the launcher target, kept between 0 and the max.
+        if (gamepad2.dpad_right && !dpadRightWasDown) {
+            launcherTargetVelocity = Math.min(launcherTargetVelocity + LAUNCHER_VELOCITY_STEP, LAUNCHER_MAX_VELOCITY);
         }
-        if (gamepad2.dpad_left) {
-            LAUNCHER_TARGET_VELOCITY -= 2;
+        if (gamepad2.dpad_left && !dpadLeftWasDown) {
+            launcherTargetVelocity = Math.max(launcherTargetVelocity - LAUNCHER_VELOCITY_STEP, 0);
         }
+        dpadRightWasDown = gamepad2.dpad_right;
+        dpadLeftWasDown = gamepad2.dpad_left;
 
         launch();
+
+        /*
+         * Launcher status, shown first so it's at the top of the Driver Station screen.
+         * launcherWasAtSpeed was just updated inside launch(), so it reflects this loop.
+         */
+        telemetry.addData("Shooter", launcherWasAtSpeed ? "READY TO FIRE" : "NOT READY");
+        telemetry.addData("Target velocity", "%d ticks/s", launcherTargetVelocity);
+        telemetry.addData("Actual velocity", "%.0f ticks/s", launcher.getVelocity());
 
                     /*
          * Here we set our intake motor and servos to their intake power. The order of operations
@@ -241,8 +257,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          * Show motor powers on the Driver Station via telemetry.
          */
         telemetry.addData("Motors", "left (%.2f), right (%.2f)", leftFrontPower, rightFrontPower);
-        telemetry.addData("Triggers", "left (%.2f, right (%.2f)",gamepad2.left_trigger, gamepad2.right_trigger);
-        telemetry.addData("speed", "target (%d), actual (%.0f)", LAUNCHER_TARGET_VELOCITY, launcher.getVelocity());
+        telemetry.addData("Triggers", "left (%.2f), right (%.2f)",gamepad2.left_trigger, gamepad2.right_trigger);
 
     }
 
@@ -281,19 +296,18 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
 
     void launch() {
         // Keep the launcher spinning at the target velocity the whole time teleop is running.
-        launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
+        launcher.setVelocity(launcherTargetVelocity);
 
         /*
          * When the launcher reaches its target velocity, rumble both controllers once and show
          * it on the Driver Station so the drivers know it's ready to shoot.
          */
-        boolean launcherAtSpeed = Math.abs(launcher.getVelocity() - LAUNCHER_TARGET_VELOCITY) <= LAUNCHER_VELOCITY_TOLERANCE;
+        boolean launcherAtSpeed = Math.abs(launcher.getVelocity() - launcherTargetVelocity) <= LAUNCHER_VELOCITY_TOLERANCE;
         if (launcherAtSpeed && !launcherWasAtSpeed) {
             gamepad1.rumble(300);
             gamepad2.rumble(300);
         }
         launcherWasAtSpeed = launcherAtSpeed;
-        telemetry.addData("Launcher", launcherAtSpeed ? "AT SPEED - READY" : "not ready");
 
         /*
          * Here we ask if the driver is currently pressing the right bumper, AND the launcher is
