@@ -76,6 +76,12 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
     public int LAUNCHER_TARGET_VELOCITY = 1250; //2678 RPM
     public final int LAUNCHER_MIN_VELOCITY = 1000; //2571 RPM
 
+    // How close (in ticks per second) the launcher must be to the target to count as "at speed".
+    public final int LAUNCHER_VELOCITY_TOLERANCE = 50;
+
+    // Tracks whether the launcher was at speed last loop, so we only rumble once when it gets there.
+    boolean launcherWasAtSpeed = false;
+
 
     /*
      * These four variables store the power we need to apply to the motors. In other cases, we may
@@ -236,7 +242,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          */
         telemetry.addData("Motors", "left (%.2f), right (%.2f)", leftFrontPower, rightFrontPower);
         telemetry.addData("Triggers", "left (%.2f, right (%.2f)",gamepad2.left_trigger, gamepad2.right_trigger);
-        telemetry.addData("speed", "left (%.2f, right (%.2f)",(double) LAUNCHER_TARGET_VELOCITY,(double) LAUNCHER_TARGET_VELOCITY);
+        telemetry.addData("speed", "target (%d), actual (%.0f)", LAUNCHER_TARGET_VELOCITY, launcher.getVelocity());
 
     }
 
@@ -274,19 +280,20 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
     }
 
     void launch() {
+        // Keep the launcher spinning at the target velocity the whole time teleop is running.
+        launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
+
         /*
-         * Calling gamepad1.right_bumper returns a boolean which will be true if the bumper is
-         * held down, and false if it is not. Notably, this will continue to be true for every
-         * cycle of our code that the driver holds down that bumper.
-         * The first step of our launch() function is checking to see if the user is currently
-         * holding down the right gamepad. If they are, then we want to start spinning up the launcher.
-         * Otherwise, we start spinning the launcher down.
+         * When the launcher reaches its target velocity, rumble both controllers once and show
+         * it on the Driver Station so the drivers know it's ready to shoot.
          */
-        if (gamepad2.right_bumper) {
-            launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
-        } else {
-            launcher.setVelocity(0);
+        boolean launcherAtSpeed = Math.abs(launcher.getVelocity() - LAUNCHER_TARGET_VELOCITY) <= LAUNCHER_VELOCITY_TOLERANCE;
+        if (launcherAtSpeed && !launcherWasAtSpeed) {
+            gamepad1.rumble(300);
+            gamepad2.rumble(300);
         }
+        launcherWasAtSpeed = launcherAtSpeed;
+        telemetry.addData("Launcher", launcherAtSpeed ? "AT SPEED - READY" : "not ready");
 
         /*
          * Here we ask if the driver is currently pressing the right bumper, AND the launcher is
