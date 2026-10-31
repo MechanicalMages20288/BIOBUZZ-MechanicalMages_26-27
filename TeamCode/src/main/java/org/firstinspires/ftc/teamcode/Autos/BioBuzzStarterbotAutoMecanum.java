@@ -62,10 +62,10 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
 
     /*
      * Launcher speeds in encoder ticks per second (same units as the teleop).
-     * 1250 ticks/s is about 2680 RPM.
+     * 1650 ticks/s is about 3540 RPM. Tuned with FlywheelPIDFTuner.
      */
-    public final int LAUNCHER_TARGET_VELOCITY = 1225;
-    public final int LAUNCHER_MIN_VELOCITY = 1200;
+    public final int LAUNCHER_TARGET_VELOCITY = 1650;
+    public final int LAUNCHER_MIN_VELOCITY = 1600;
 
     /*
      * Start feeding once the launcher is at speed, OR after this many seconds of spin-up,
@@ -135,6 +135,8 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
         rightBackDrive = hardwareMap.get(DcMotor.class, "right_back_drive");
         intake = hardwareMap.get(DcMotor.class, "intake");
         launcher = hardwareMap.get(DcMotorEx.class, "launcher");
+        // Reverse in code (not by swapping wires) so the motor and its encoder stay matched.
+        launcher.setDirection(DcMotorSimple.Direction.REVERSE);
         windmillServo = hardwareMap.get(CRServo.class, "windmillServo");
         leftIntakeServo = hardwareMap.get(CRServo.class, "left_intake_servo");
         rightIntakeServo = hardwareMap.get(CRServo.class, "right_intake_servo");
@@ -161,7 +163,7 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
         intake.setZeroPowerBehavior(BRAKE);
 
         launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 12.5));
+        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 14.4));
 
         leftIntakeServo.setPower(0);
         rightIntakeServo.setPower(0);

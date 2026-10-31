@@ -65,13 +65,13 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
 
     /*
      * Launcher speeds, all in encoder ticks per second. The encoder counts 28 ticks per motor
-     * revolution, so RPM = ticks/s * 60 / 28 (1250 ticks/s is about 2680 RPM).
+     * revolution, so RPM = ticks/s * 60 / 28 (1650 ticks/s is about 3540 RPM).
      *
      * LAUNCHER_MAX_VELOCITY is about the fastest a goBILDA 6000 RPM (1:1) motor can spin with
      * no load (2800 ticks/s = 6000 RPM). With the flywheel on it tops out a bit below that.
      */
     final int LAUNCHER_MAX_VELOCITY = 2800;
-    public int launcherTargetVelocity = 1225;
+    public int launcherTargetVelocity = 1650; // tuned with FlywheelPIDFTuner
     public final int LAUNCHER_MIN_VELOCITY = 1000;
 
     // How close (in ticks/s) the launcher must be to the target to count as "at speed".
@@ -118,6 +118,8 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         rightBackDrive = hardwareMap.get(DcMotor.class, "right_back_drive");
         intake = hardwareMap.get(DcMotor.class, "intake");
         launcher = hardwareMap.get(DcMotorEx.class, "launcher");
+        // Reverse in code (not by swapping wires) so the motor and its encoder stay matched.
+        launcher.setDirection(DcMotorSimple.Direction.REVERSE);
         windmillServo = hardwareMap.get(CRServo.class, "windmillServo");
         leftIntakeServo = hardwareMap.get(CRServo.class, "left_intake_servo");
         rightIntakeServo = hardwareMap.get(CRServo.class, "right_intake_servo");
@@ -155,7 +157,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
 
         launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
-        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 12.5));
+        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 14.4));
 
         /*
          * set Feeders to an initial value to initialize the servo controller
