@@ -26,7 +26,6 @@ import static com.qualcomm.robotcore.hardware.DcMotor.ZeroPowerBehavior.BRAKE;
 
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
-import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
@@ -35,8 +34,8 @@ import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 /*
  * This file includes a teleop (driver-controlled) file for the goBILDA® StarterBot with Mecanum
  * Wheels for the 2026-2027 FIRST® Tech Challenge. On top of a mecanum wheel drivetrain, it uses
- * one motor driving an intake roller, two servos which pull elements out of corners, and a high-speed
- * launcher motor.
+ * one motor driving an intake roller, one motor driving transfer rollers that feed the launcher,
+ * and a high-speed launcher motor.
  *
  * Likely the most niche concept we'll use in this example is closed-loop motor velocity control.
  * This control method reads the current speed as reported by the motor's encoder and applies a varying
@@ -58,31 +57,63 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
     private DcMotor rightBackDrive = null;
     private DcMotorEx launcher = null;
     private DcMotor intake = null;
-    private CRServo leftIntakeServo = null;
-    private CRServo rightIntakeServo = null;
-    private CRServo windmillServo = null;
+    private DcMotor transfer = null;
+
+    /*
+     * GAMEPAD 2 (operator) CONTROLS
+     *   A (hold)              intake: intake motor only
+     *   B (hold)              outtake: intake AND transfer in reverse (also clears jams)
+     *   Right trigger (hold)  FIRE: intake + transfer together, feeding balls into the flywheel
+     *   D-pad right / left    flywheel speed +25 / -25 ticks/s
+     *   D-pad up              flywheel speed +100 ticks/s
+     *   D-pad down            reset flywheel speed to the default (1650)
+     * The flywheel spins the whole time teleop is running.
+     */
+
+    // Intake motor power for A (intake) and B (outtake).
+    public final double INTAKE_POWER = 1;
+    public final double OUTTAKE_POWER = -1;
+
+    /*
+     * Power for the transfer rollers when firing. If the rollers push balls the wrong way,
+     * flip this to -1.
+     */
+    public final double TRANSFER_FEED_POWER = 1;
+
+    // Transfer power while outtaking with B (opposite of feeding).
+    public final double TRANSFER_OUTTAKE_POWER = -TRANSFER_FEED_POWER;
+
+    // Intake power while firing, so the intake also pushes balls up into the transfer.
+    public final double INTAKE_FIRE_POWER = 1;
+
+    // How far the right trigger must be pulled to fire.
+    public final double FIRE_TRIGGER_THRESHOLD = 0.5;
 
 
     /*
      * Launcher speeds, all in encoder ticks per second. The encoder counts 28 ticks per motor
-     * revolution, so RPM = ticks/s * 60 / 28 (1250 ticks/s is about 2680 RPM).
+     * revolution, so RPM = ticks/s * 60 / 28 (1650 ticks/s is about 3540 RPM).
      *
      * LAUNCHER_MAX_VELOCITY is about the fastest a goBILDA 6000 RPM (1:1) motor can spin with
      * no load (2800 ticks/s = 6000 RPM). With the flywheel on it tops out a bit below that.
      */
     final int LAUNCHER_MAX_VELOCITY = 2800;
-    public int launcherTargetVelocity = 1225;
+    public final int LAUNCHER_DEFAULT_VELOCITY = 1650; // tuned with FlywheelPIDFTuner
+    public int launcherTargetVelocity = LAUNCHER_DEFAULT_VELOCITY;
     public final int LAUNCHER_MIN_VELOCITY = 1000;
 
     // How close (in ticks/s) the launcher must be to the target to count as "at speed".
     public final int LAUNCHER_VELOCITY_TOLERANCE = 50;
 
-    // Each tap of d-pad right/left changes the target by this many ticks/s.
+    // Each tap of d-pad right/left changes the target by the small step; up adds the big step.
     public final int LAUNCHER_VELOCITY_STEP = 25;
+    public final int LAUNCHER_VELOCITY_BIG_STEP = 100;
 
     // Last loop's d-pad state, so one tap changes the target once.
     boolean dpadRightWasDown = false;
     boolean dpadLeftWasDown = false;
+    boolean dpadUpWasDown = false;
+    boolean dpadDownWasDown = false;
 
     // Whether the launcher is at its target velocity, updated every loop in launch().
     boolean launcherAtSpeed = false;
@@ -112,15 +143,17 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          * to 'get' must correspond to the names assigned during the robot configuration
          * step.
          */
-        leftFrontDrive = hardwareMap.get(DcMotor.class, "left_front_drive");
-        rightFrontDrive = hardwareMap.get(DcMotor.class, "right_front_drive");
-        leftBackDrive = hardwareMap.get(DcMotor.class, "left_back_drive");
-        rightBackDrive = hardwareMap.get(DcMotor.class, "right_back_drive");
+        leftFrontDrive = hardwareMap.get(DcMotor.class, "leftFrontDrive");
+        rightFrontDrive = hardwareMap.get(DcMotor.class, "rightFrontDrive");
+        leftBackDrive = hardwareMap.get(DcMotor.class, "leftBackDrive");
+        rightBackDrive = hardwareMap.get(DcMotor.class, "rightBackDrive");
         intake = hardwareMap.get(DcMotor.class, "intake");
         launcher = hardwareMap.get(DcMotorEx.class, "launcher");
-        windmillServo = hardwareMap.get(CRServo.class, "windmillServo");
-        leftIntakeServo = hardwareMap.get(CRServo.class, "left_intake_servo");
-        rightIntakeServo = hardwareMap.get(CRServo.class, "right_intake_servo");
+        // Reverse in code (not by swapping wires) so the motor and its encoder stay matched.
+        launcher.setDirection(DcMotorSimple.Direction.REVERSE);
+        transfer = hardwareMap.get(DcMotor.class, "transfer");
+        // Reversed so positive power feeds balls toward the flywheel.
+        transfer.setDirection(DcMotorSimple.Direction.REVERSE);
 
         /*
          * To drive forward, most robots need the motor on one side to be reversed,
@@ -144,6 +177,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         leftBackDrive.setZeroPowerBehavior(BRAKE);
         rightBackDrive.setZeroPowerBehavior(BRAKE);
         intake.setZeroPowerBehavior(BRAKE);
+        transfer.setZeroPowerBehavior(BRAKE);
 
         /*
          * Here we set our launcher to the RUN_USING_ENCODER runmode.
@@ -155,21 +189,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
 
         launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
-        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 12.5));
-
-        /*
-         * set Feeders to an initial value to initialize the servo controller
-         */
-        leftIntakeServo.setPower(0);
-        rightIntakeServo.setPower(0);
-        windmillServo.setPower(0);
-
-        /*
-         * Much like our drivetrain motors, we set the right intake servo to reverse so that both
-         * servos work to pull elements into the intake.
-         */
-        rightIntakeServo.setDirection(DcMotorSimple.Direction.REVERSE);
-        windmillServo.setDirection(DcMotorSimple.Direction.REVERSE);
+        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40,  0, 0, 14.4));
 
         /*
          * Tell the driver that initialization is complete.
@@ -209,27 +229,34 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         mecanumDrive(-gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x);
 
         /*
-         * Set the intake power variable to equal the right trigger, minus the left trigger.
-         * Each trigger outputs a signal from 0-1, with 0 as fully released, and 1 fully depressed.
-         * This gives us proportional control of the intake speed. The speed increases as we pull
-         * the right trigger further. It's occasionally helpful to be able to reverse the intake,
-         * so we also factor in the left trigger. If the left trigger is fully depressed,
-         * the intakePower variable will be -1. If the right trigger is fully depressed, the variable
-         * will be 1. If the driver pulls both triggers, the intake will remain off.
-         * We use this technique (creating a variable, and setting it to our control inputs) to
-         * allow us to avoid setting the same motors/servos power more than once per loop. That can
-         * create erratic behavior.
+         * Intake: hold A to intake, B to outtake. The transfer is handled in launch(): it runs
+         * forward when firing (right trigger) and in reverse with B.
          */
-        intakePower = gamepad2.right_trigger - gamepad2.left_trigger;
-        // Tap d-pad right/left to raise/lower the launcher target, kept between 0 and the max.
+        if (gamepad2.a) {
+            intakePower = INTAKE_POWER;
+        } else if (gamepad2.b) {
+            intakePower = OUTTAKE_POWER;
+        } else {
+            intakePower = 0;
+        }
+
+        // D-pad adjusts the flywheel target: right/left small steps, up big step, down resets.
         if (gamepad2.dpad_right && !dpadRightWasDown) {
-            launcherTargetVelocity = Math.min(launcherTargetVelocity + LAUNCHER_VELOCITY_STEP, LAUNCHER_MAX_VELOCITY);
+            changeLauncherTarget(LAUNCHER_VELOCITY_STEP);
         }
         if (gamepad2.dpad_left && !dpadLeftWasDown) {
-            launcherTargetVelocity = Math.max(launcherTargetVelocity - LAUNCHER_VELOCITY_STEP, 0);
+            changeLauncherTarget(-LAUNCHER_VELOCITY_STEP);
+        }
+        if (gamepad2.dpad_up && !dpadUpWasDown) {
+            changeLauncherTarget(LAUNCHER_VELOCITY_BIG_STEP);
+        }
+        if (gamepad2.dpad_down && !dpadDownWasDown) {
+            launcherTargetVelocity = LAUNCHER_DEFAULT_VELOCITY;
         }
         dpadRightWasDown = gamepad2.dpad_right;
         dpadLeftWasDown = gamepad2.dpad_left;
+        dpadUpWasDown = gamepad2.dpad_up;
+        dpadDownWasDown = gamepad2.dpad_down;
 
         launch();
 
@@ -241,23 +268,12 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         telemetry.addData("Target velocity", "%d ticks/s", launcherTargetVelocity);
         telemetry.addData("Actual velocity", "%.0f ticks/s", launcher.getVelocity());
 
-                    /*
-         * Here we set our intake motor and servos to their intake power. The order of operations
-         * here is important though. The gamepad triggers define the starting point for the intake
-         * power variable in each loop of our code, but inside our launch function we also sometimes
-         * change the intake power. So we need to give our launch function a chance to modify the
-         * variable before we write it to our motor and servos.
-         */
-
         intake.setPower(intakePower);
-        leftIntakeServo.setPower(intakePower);
-        rightIntakeServo.setPower(intakePower);
 
         /*
          * Show motor powers on the Driver Station via telemetry.
          */
         telemetry.addData("Motors", "left (%.2f), right (%.2f)", leftFrontPower, rightFrontPower);
-        telemetry.addData("Triggers", "left (%.2f), right (%.2f)",gamepad2.left_trigger, gamepad2.right_trigger);
 
     }
 
@@ -266,6 +282,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
      */
     @Override
     public void stop() {
+        transfer.setPower(0);
     }
 
     void mecanumDrive(double forward, double strafe, double rotate) {
@@ -302,25 +319,22 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         launcherAtSpeed = Math.abs(launcher.getVelocity() - launcherTargetVelocity) <= LAUNCHER_VELOCITY_TOLERANCE;
 
         /*
-         * Here we ask if the driver is currently pressing the right bumper, AND the launcher is
-         * spinning fast enough to make a successful shot. If it is, then we will turn on the
-         * windmill servo to start feeding the elements into the launcher motor. We also
-         * add some power to the intake power. This can sometimes help dislodge stuck elements from
-         * inside the hopper.
+         * FIRE: hold gamepad 2 right trigger to run every stage (intake + transfer) and push balls
+         * into the flywheel. This overrides A/B for the intake while held.
          */
-        /*
-        if (gamepad1.right_bumper && launcher.getVelocity() > LAUNCHER_MIN_VELOCITY) {
-            windmillServo.setPower(1);
-            intakePower += 0.5;
+        if (gamepad2.right_trigger > FIRE_TRIGGER_THRESHOLD) {
+            transfer.setPower(TRANSFER_FEED_POWER);b
+            intakePower = INTAKE_FIRE_POWER;
+        } else if (gamepad2.b) {
+            // Outtake: run the transfer backward too, pushing balls back out (clears jams).
+            transfer.setPower(TRANSFER_OUTTAKE_POWER);
         } else {
-            windmillServo.setPower(0);
+            transfer.setPower(0);
         }
+    }
 
-         */
-        if(gamepad2.left_bumper) {
-            windmillServo.setPower(-1);
-        } else {
-            windmillServo.setPower(0);
-        }
+    // Change the flywheel target, kept between 0 and the max.
+    void changeLauncherTarget(int amount) {
+        launcherTargetVelocity = Math.max(0, Math.min(launcherTargetVelocity + amount, LAUNCHER_MAX_VELOCITY));
     }
 }
