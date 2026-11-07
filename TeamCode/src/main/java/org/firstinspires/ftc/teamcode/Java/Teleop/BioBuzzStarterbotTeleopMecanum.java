@@ -286,9 +286,15 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
     }
 
     void mecanumDrive(double forward, double strafe, double rotate) {
-        leftFrontPower = forward + strafe + rotate;
+        /*
+         * Strafe signs on the LEFT side are flipped from the standard mecanum formula. On this
+         * robot the left front/back motors are swapped, so the standard formula made the two
+         * sides push sideways against each other and the robot couldn't strafe.
+         * If strafing now goes the wrong way, flip the strafe input in loop() instead.
+         */
+        leftFrontPower = forward - strafe + rotate;
         rightFrontPower = forward - strafe - rotate;
-        leftBackPower = forward - strafe + rotate;
+        leftBackPower = forward + strafe + rotate;
         rightBackPower = forward + strafe - rotate;
 
         double max = Math.max(Math.abs(leftFrontPower), Math.abs(rightFrontPower));

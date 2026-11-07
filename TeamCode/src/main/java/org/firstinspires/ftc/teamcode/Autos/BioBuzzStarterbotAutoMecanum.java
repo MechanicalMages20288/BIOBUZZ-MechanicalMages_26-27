@@ -253,10 +253,11 @@ public class  BioBuzzStarterbotAutoMecanum extends OpMode {
 
     /**
      * Strafe sideways. Positive power = right, negative = left.
-     * Matches the teleop: LF +, RF -, LB -, RB + strafes right.
+     * Matches the teleop: the left side's strafe signs are flipped because this robot's left
+     * front/back motors are swapped (LF -, RF -, LB +, RB +).
      */
     boolean strafe(double power, double seconds) {
-        return timedMove(power, -power, -power, power, seconds);
+        return timedMove(-power, -power, power, power, seconds);
     }
 
     /**
