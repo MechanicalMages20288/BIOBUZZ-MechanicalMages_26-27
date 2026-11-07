@@ -36,7 +36,6 @@ import static com.qualcomm.robotcore.hardware.DcMotor.ZeroPowerBehavior.BRAKE;
 
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
-import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
@@ -62,10 +61,10 @@ public class  BioBuzzStarterbotAutoMecanum extends OpMode {
 
     /*
      * Launcher speeds in encoder ticks per second (same units as the teleop).
-     * 1250 ticks/s is about 2680 RPM.
+     * 1650 ticks/s is about 3540 RPM. Tuned with FlywheelPIDFTuner.
      */
-    public final int LAUNCHER_TARGET_VELOCITY = 1200;
-    public final int LAUNCHER_MIN_VELOCITY = 1150;
+    public final int LAUNCHER_TARGET_VELOCITY = 1650;
+    public final int LAUNCHER_MIN_VELOCITY = 1600;
 
     /*
      * Start feeding once the launcher is at speed, OR after this many seconds of spin-up,
@@ -75,10 +74,13 @@ public class  BioBuzzStarterbotAutoMecanum extends OpMode {
     final double SPIN_UP_SECONDS = 2;
 
     /*
-     * Windmill power used to feed the launcher. Your teleop feeds with -1 (left bumper),
-     * so we use the same here. Flip to 1 if the windmill spins the wrong way.
+     * Transfer roller power used to feed the launcher. Same as the teleop's left bumper.
+     * Flip to -1 if the rollers push balls the wrong way.
      */
-    final double WINDMILL_FEED_POWER = -1;
+    final double TRANSFER_FEED_POWER = 1;
+
+    // Intake power while firing, same as the teleop.
+    final double INTAKE_FIRE_POWER = 1;
 
     // How long (seconds) to spend launching before driving away.
     final double LAUNCH_SECONDS = 10;
@@ -109,9 +111,7 @@ public class  BioBuzzStarterbotAutoMecanum extends OpMode {
     private DcMotor rightBackDrive = null;
     private DcMotorEx launcher = null;
     private DcMotor intake = null;
-    private CRServo leftIntakeServo = null;
-    private CRServo rightIntakeServo = null;
-    private CRServo windmillServo = null;
+    private DcMotor transfer = null;
 
     // Whether the current timed move has started (and its timer been reset) yet.
     private boolean moveStarted = false;
@@ -135,9 +135,11 @@ public class  BioBuzzStarterbotAutoMecanum extends OpMode {
         rightBackDrive = hardwareMap.get(DcMotor.class, "right_back_drive");
         intake = hardwareMap.get(DcMotor.class, "intake");
         launcher = hardwareMap.get(DcMotorEx.class, "launcher");
-        windmillServo = hardwareMap.get(CRServo.class, "windmillServo");
-        leftIntakeServo = hardwareMap.get(CRServo.class, "left_intake_servo");
-        rightIntakeServo = hardwareMap.get(CRServo.class, "right_intake_servo");
+        // Reverse in code (not by swapping wires) so the motor and its encoder stay matched.
+        launcher.setDirection(DcMotorSimple.Direction.REVERSE);
+        transfer = hardwareMap.get(DcMotor.class, "transfer");
+        // Reversed so positive power feeds balls toward the flywheel (same as the teleop).
+        transfer.setDirection(DcMotorSimple.Direction.REVERSE);
 
         // Same directions as the mecanum teleop.
         leftFrontDrive.setDirection(DcMotor.Direction.REVERSE);
@@ -159,16 +161,11 @@ public class  BioBuzzStarterbotAutoMecanum extends OpMode {
         leftBackDrive.setZeroPowerBehavior(BRAKE);
         rightBackDrive.setZeroPowerBehavior(BRAKE);
         intake.setZeroPowerBehavior(BRAKE);
+        transfer.setZeroPowerBehavior(BRAKE);
 
         launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 12.5));
+        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 14.4));
 
-        leftIntakeServo.setPower(0);
-        rightIntakeServo.setPower(0);
-        windmillServo.setPower(0);
-
-        rightIntakeServo.setDirection(DcMotorSimple.Direction.REVERSE);
-        windmillServo.setDirection(DcMotorSimple.Direction.REVERSE);
 
         telemetry.addData("Status", "Initialized");
     }
@@ -212,8 +209,6 @@ public class  BioBuzzStarterbotAutoMecanum extends OpMode {
         }
 
         intake.setPower(intakePower);
-        leftIntakeServo.setPower(intakePower);
-        rightIntakeServo.setPower(intakePower);
 
         telemetry.addData("AutoState", autonomousState);
         telemetry.addData("Auto time", "%.1f s", autoTimer.seconds());
@@ -226,7 +221,7 @@ public class  BioBuzzStarterbotAutoMecanum extends OpMode {
     public void stop() {
         stopDrive();
         launcher.setVelocity(0);
-        windmillServo.setPower(0);
+        transfer.setPower(0);
     }
 
     void launch(boolean input) {
@@ -240,10 +235,11 @@ public class  BioBuzzStarterbotAutoMecanum extends OpMode {
                 || autoTimer.seconds() > SPIN_UP_SECONDS;
 
         if (input && readyToFeed) {
-            windmillServo.setPower(WINDMILL_FEED_POWER);
-            intakePower = 0.5;
+            // Firing runs every stage: intake + transfer, same as the teleop.
+            transfer.setPower(TRANSFER_FEED_POWER);
+            intakePower = INTAKE_FIRE_POWER;
         } else {
-            windmillServo.setPower(0);
+            transfer.setPower(0);
         }
     }
 
