@@ -1,8 +1,5 @@
 package org.firstinspires.ftc.teamcode.pedro.procedures;
 
-import static com.pedropathing.api.Paths.curve;
-import static com.pedropathing.api.Paths.line;
-
 import com.pedropathing.algorithm.Algorithm;
 import com.pedropathing.drivetrain.DrivePowers;
 import com.pedropathing.drivetrain.Drivetrain;
@@ -21,6 +18,9 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 
 import java.util.function.Function;
 import java.util.function.Supplier;
+
+import static com.pedropathing.api.Paths.curve;
+import static com.pedropathing.api.Paths.line;
 
 public class Tests extends Procedure {
     enum Test {
@@ -450,6 +450,15 @@ class TestsDriving extends TuningOpMode<Boolean> {
         waitForStart();
         while (opModeIsActive()) {
             drivetrain.drive(new DrivePowers(-gamepad1.left_stick_y, -gamepad1.left_stick_x, -gamepad1.right_stick_x), true);
+
+            // Debug readout (added by our team): what the sticks read and what each wheel is told.
+            telemetry.addData("Left stick X (strafe)", "%.2f", gamepad1.left_stick_x);
+            telemetry.addData("Left stick Y (forward)", "%.2f", gamepad1.left_stick_y);
+            telemetry.addData("Right stick X (turn)", "%.2f", gamepad1.right_stick_x);
+            for (java.util.Map.Entry<String, Object> e : drivetrain.debug().entrySet()) {
+                telemetry.addData(e.getKey(), e.getValue());
+            }
+            telemetry.update();
         }
         return true;
     }
