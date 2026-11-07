@@ -323,7 +323,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          * into the flywheel. This overrides A/B for the intake while held.
          */
         if (gamepad2.right_trigger > FIRE_TRIGGER_THRESHOLD) {
-            transfer.setPower(TRANSFER_FEED_POWER);b
+            transfer.setPower(TRANSFER_FEED_POWER);
             intakePower = INTAKE_FIRE_POWER;
         } else if (gamepad2.b) {
             // Outtake: run the transfer backward too, pushing balls back out (clears jams).
