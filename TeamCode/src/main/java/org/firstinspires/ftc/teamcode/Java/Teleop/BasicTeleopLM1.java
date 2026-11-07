@@ -46,9 +46,13 @@ import com.qualcomm.robotcore.hardware.PIDFCoefficients;
  * we will also need to adjust the "PIDF" coefficients with some that are a better fit for our application.
  */
 
-@TeleOp(name = "Mec BioBuzz StarterBot Teleop", group = "StarterBot")
+/*
+ * BasicTeleopLM1: driver control with no odometry. RedTeleopLM1 / BlueTeleopLM1 build on this
+ * class (through AimTeleopLM1) and add hive auto-aim; they change turning via turnCommand().
+ */
+@TeleOp(name = "BasicTeleopLM1", group = "LM1")
 //@Disabled
-public class BioBuzzStarterbotTeleopMecanum extends OpMode {
+public class BasicTeleopLM1 extends OpMode {
 
     // Declare OpMode members.
     private DcMotor leftFrontDrive = null;
@@ -226,7 +230,10 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          * Note, moving the joystick forward on most gamepads results in a negative signal, so
          * we invert it before passing it to the function.
          */
-        mecanumDrive(-gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x);
+        double forward = -gamepad1.left_stick_y;
+        double strafe = gamepad1.left_stick_x;
+        double rotate = turnCommand(forward, strafe, gamepad1.right_stick_x);
+        mecanumDrive(forward, strafe, rotate);
 
         /*
          * Intake: hold A to intake, B to outtake. The transfer is handled in launch(): it runs
@@ -283,6 +290,15 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
     @Override
     public void stop() {
         transfer.setPower(0);
+    }
+
+    /*
+     * Turning power for this loop. The basic teleop just uses the driver's right stick.
+     * AimTeleopLM1 overrides this to turn the robot toward the hive while auto-aim is on.
+     * Positive = turn clockwise (right), same as pushing the right stick right.
+     */
+    protected double turnCommand(double forward, double strafe, double driverTurn) {
+        return driverTurn;
     }
 
     void mecanumDrive(double forward, double strafe, double rotate) {
