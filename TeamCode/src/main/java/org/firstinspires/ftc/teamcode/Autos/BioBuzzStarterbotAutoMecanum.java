@@ -93,8 +93,10 @@ public class  BioBuzzStarterbotAutoMecanum extends OpMode {
      * positive strafe power. If a move goes the wrong way, flip the sign of its power.
      * Timed moves depend on battery charge and floor grip, so tune the seconds on the field.
      */
+    final double STRAFE_RIGHT_POWER = -1.0;
+    final double STRAFE_RIGHT_SECONDS = 0.5;
     final double STRAIGHT_POWER = -0.9;
-    final double STRAIGHT_SECONDS = 2              ;
+    final double STRAIGHT_SECONDS = 2;
     final double STRAFE_LEFT_POWER = 0.4;
     final double STRAFE_LEFT_SECONDS = 3;
 
@@ -118,6 +120,7 @@ public class  BioBuzzStarterbotAutoMecanum extends OpMode {
 
     private enum AutonomousState {
         LAUNCH,
+        STRAFE_RIGHT,
         STRAIGHT,
         STRAFE_LEFT,
         COMPLETE
@@ -171,7 +174,7 @@ public class  BioBuzzStarterbotAutoMecanum extends OpMode {
         windmillServo.setDirection(DcMotorSimple.Direction.REVERSE);
 
         telemetry.addData("Status", "Initialized");
-    }
+    }   
 
     @Override
     public void init_loop() {
@@ -192,6 +195,11 @@ public class  BioBuzzStarterbotAutoMecanum extends OpMode {
                 if (autoTimer.seconds() > LAUNCH_SECONDS) {
                     launch(false);
                     intakePower = 0;
+                    autonomousState = AutonomousState.STRAFE_RIGHT;
+                }
+                break;
+            case STRAFE_RIGHT:
+                if (strafe(STRAFE_RIGHT_POWER, STRAFE_RIGHT_SECONDS)) {
                     autonomousState = AutonomousState.STRAIGHT;
                 }
                 break;

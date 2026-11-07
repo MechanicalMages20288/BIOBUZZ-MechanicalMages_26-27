@@ -286,9 +286,9 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
     }
 
     void mecanumDrive(double forward, double strafe, double rotate) {
-        leftFrontPower = forward + strafe + rotate;
+        leftFrontPower = forward - strafe + rotate;
         rightFrontPower = forward - strafe - rotate;
-        leftBackPower = forward - strafe + rotate;
+        leftBackPower = forward + strafe + rotate;
         rightBackPower = forward + strafe - rotate;
 
         double max = Math.max(Math.abs(leftFrontPower), Math.abs(rightFrontPower));
@@ -323,7 +323,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          * into the flywheel. This overrides A/B for the intake while held.
          */
         if (gamepad2.right_trigger > FIRE_TRIGGER_THRESHOLD) {
-            transfer.setPower(TRANSFER_FEED_POWER);b
+            transfer.setPower(TRANSFER_FEED_POWER);
             intakePower = INTAKE_FIRE_POWER;
         } else if (gamepad2.b) {
             // Outtake: run the transfer backward too, pushing balls back out (clears jams).
