@@ -24,12 +24,17 @@ package org.firstinspires.ftc.teamcode.Java.Teleop;
 
 import static com.qualcomm.robotcore.hardware.DcMotor.ZeroPowerBehavior.BRAKE;
 
+import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
+
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
 
 /*
  * This file includes a teleop (driver-controlled) file for the goBILDA® StarterBot with Mecanum
@@ -58,6 +63,16 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
     private DcMotorEx launcher = null;
     private DcMotor intake = null;
     private DcMotor transfer = null;
+    private GoBildaPinpointDriver pinpoint = null;
+
+    /*
+     * PINPOINT ODOMETRY SETUP - measure these on the robot.
+     * Offsets are how far each pod is from the robot's center (the point we track), in mm:
+     *   X_POD_OFFSET: how far LEFT of center the forward-facing (X) pod is. Right of center = negative.
+     *   Y_POD_OFFSET: how far FORWARD of center the sideways (Y) pod is. Behind center = negative.
+     */
+    final double X_POD_OFFSET_MM = 152.4;  // X pod is 6 in left of center
+    final double Y_POD_OFFSET_MM = -127.0; // Y pod is 5 in behind center
 
     /*
      * GAMEPAD 2 (operator) CONTROLS
@@ -192,6 +207,20 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40,  0, 0, 14.4));
 
         /*
+         * Pinpoint odometry computer. The name must match the robot configuration.
+         * Pod type: goBILDA_4_BAR_POD or goBILDA_SWINGARM_POD, whichever is on the robot.
+         * Directions: the X pod must count UP when the robot drives forward, and the Y pod must
+         * count UP when the robot strafes LEFT. If one counts the wrong way, flip it to REVERSED.
+         */
+        pinpoint = hardwareMap.get(GoBildaPinpointDriver.class, "pinpoint");
+        pinpoint.setOffsets(X_POD_OFFSET_MM, Y_POD_OFFSET_MM, DistanceUnit.MM);
+        pinpoint.setEncoderResolution(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD);
+        pinpoint.setEncoderDirections(GoBildaPinpointDriver.EncoderDirection.FORWARD,
+                                      GoBildaPinpointDriver.EncoderDirection.FORWARD);
+        // Sets position to (0, 0) and heading to 0, and recalibrates the IMU. Robot must be still during INIT.
+        pinpoint.resetPosAndIMU();
+
+        /*
          * Tell the driver that initialization is complete.
          */
         telemetry.addData("Status", "Initialized");
@@ -269,6 +298,21 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         telemetry.addData("Actual velocity", "%.0f ticks/s", launcher.getVelocity());
 
         intake.setPower(intakePower);
+
+        /*
+         * Odometry: read the Pinpoint every loop and show where the robot is and which way it faces.
+         * Heading is 0 in the direction the robot faced at INIT; turning left (counterclockwise)
+         * is positive, turning right is negative, from -180 to 180.
+         * Gamepad 1 BACK resets position to (0, 0) and heading to 0 without recalibrating the IMU.
+         */
+        if (gamepad1.back) {
+            pinpoint.setPosition(new Pose2D(DistanceUnit.INCH, 0, 0, AngleUnit.DEGREES, 0));
+        }
+        pinpoint.update();
+        Pose2D pose = pinpoint.getPosition();
+        telemetry.addData("Position", "X %.1f in, Y %.1f in", pose.getX(DistanceUnit.INCH), pose.getY(DistanceUnit.INCH));
+        telemetry.addData("Heading", "%.1f deg", pose.getHeading(AngleUnit.DEGREES));
+        telemetry.addData("Pinpoint", pinpoint.getDeviceStatus());
 
         /*
          * Show motor powers on the Driver Station via telemetry.
