@@ -1,9 +1,5 @@
 package org.firstinspires.ftc.teamcode.Java.Teleop;
 
-import static org.firstinspires.ftc.robotcore.external.BlocksOpModeCompanion.gamepad1;
-import static org.firstinspires.ftc.robotcore.external.BlocksOpModeCompanion.hardwareMap;
-import static org.firstinspires.ftc.robotcore.external.BlocksOpModeCompanion.telemetry;
-
 import com.pedropathing.math.Pose;
 import com.pedropathing.revhub.localizers.PinpointLocalizer;
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
@@ -38,7 +34,7 @@ import org.firstinspires.ftc.teamcode.pedro.Constants;
  *   D-pad        with auto ON, the D-pad adds a TRIM on top of the auto speed
  *                (right/left +25/-25, up +100, down clears the trim).
  */
-public abstract class AimTeleopLM1 extends BioBuzzStarterbotTeleopMecanum {
+public abstract class AimTeleopLM1 extends BasicTeleopLM1 {
 
     // Turning power per radian of heading error, and limits on the turning power.
     public static double AIM_KP = 1.2;
@@ -197,6 +193,7 @@ public abstract class AimTeleopLM1 extends BioBuzzStarterbotTeleopMecanum {
         prevDpadRight = gamepad1.dpad_right;
     }
 
+    @Override
     protected double turnCommand(double forward, double strafe, double driverTurn) {
         Pose pose = localizer.pose();
         activeCell = chooseCell(pose);
@@ -250,7 +247,7 @@ public abstract class AimTeleopLM1 extends BioBuzzStarterbotTeleopMecanum {
      * Auto speed ON: physics-based speed for the current distance, plus the D-pad trim
      * (how far the D-pad has moved the manual target from its default). Auto OFF: manual speed.
      */
-
+    @Override
     protected int flywheelTarget() {
         if (!autoSpeed) {
             return launcherTargetVelocity;

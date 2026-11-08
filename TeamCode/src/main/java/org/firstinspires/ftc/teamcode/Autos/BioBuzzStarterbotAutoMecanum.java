@@ -50,7 +50,7 @@ import org.firstinspires.ftc.teamcode.Java.Field.AutoPoseTracker;
  *
  * The robot starts against the alliance wall facing the hive, launches its projectiles, then
  * parks in its alliance's loading zone (see the "Park path" notes below).
- * Hardware names and motor directions match BioBuzzStarterbotTeleopMecanum.
+ * Hardware names and motor directions match BasicTeleopLM1.
  *
  * The drive motors have no encoders, so every move is TIMED: the wheels run at a set power
  * for a set number of seconds. Distances change with battery level and floor grip, so tune
