@@ -1,11 +1,13 @@
 package org.firstinspires.ftc.teamcode.Tuning;
 
+import com.pedropathing.revhub.localizers.PinpointConfig;
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
+import org.firstinspires.ftc.teamcode.pedro.Constants;
 
 /*
  * Pinpoint Check: reads the goBILDA Pinpoint directly through the FTC SDK, without Pedro.
@@ -31,10 +33,17 @@ public class PinpointCheck extends OpMode {
     public void init() {
         pinpoint = hardwareMap.get(GoBildaPinpointDriver.class, PINPOINT_NAME);
 
-        // Only affects the inch values; raw tick counts don't depend on it.
-        pinpoint.setEncoderResolution(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD);
-        pinpoint.setEncoderDirections(GoBildaPinpointDriver.EncoderDirection.FORWARD,
-                GoBildaPinpointDriver.EncoderDirection.FORWARD);
+        /*
+         * Use the SAME settings as the teleops and autos (pedro/Constants.java): pod type,
+         * pod directions and pod offsets. Without the offsets, every turn would look like the
+         * robot slid sideways. Raw tick counts don't depend on any of this.
+         */
+        PinpointConfig cfg = Constants.localizerConfig;
+        if (cfg.podType.get() != null) {
+            pinpoint.setEncoderResolution(cfg.podType.get());
+        }
+        pinpoint.setEncoderDirections(cfg.xPodDirection.get(), cfg.yPodDirection.get());
+        pinpoint.setOffsets(cfg.xPodOffset.get(), cfg.yPodOffset.get(), DistanceUnit.INCH);
         pinpoint.resetPosAndIMU();
 
         telemetry.addLine("Pinpoint found. Press START, then push the robot by hand.");

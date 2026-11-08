@@ -193,7 +193,7 @@ public class BasicTeleopLM1 extends OpMode {
 
         launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
-        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40,  0, 0, 14.4));
+        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40,  0, 0, 17));
 
         /*
          * Tell the driver that initialization is complete.
@@ -230,8 +230,9 @@ public class BasicTeleopLM1 extends OpMode {
          * Note, moving the joystick forward on most gamepads results in a negative signal, so
          * we invert it before passing it to the function.
          */
-        double forward = -gamepad1.left_stick_y;
-        double strafe = gamepad1.left_stick_x;
+        // Tiny stick values (resting drift) count as zero so the robot doesn't creep on its own.
+        double forward = deadband(-gamepad1.left_stick_y);
+        double strafe = deadband(gamepad1.left_stick_x);
         double rotate = turnCommand(forward, strafe, gamepad1.right_stick_x);
         mecanumDrive(forward, strafe, rotate);
 
@@ -272,7 +273,7 @@ public class BasicTeleopLM1 extends OpMode {
          * launcherAtSpeed was just updated inside launch(), so it reflects this loop.
          */
         telemetry.addData("Shooter", launcherAtSpeed ? "READY TO FIRE" : "NOT READY");
-        telemetry.addData("Target velocity", "%d ticks/s", launcherTargetVelocity);
+        telemetry.addData("Target velocity", "%d ticks/s", flywheelTarget());
         telemetry.addData("Actual velocity", "%.0f ticks/s", launcher.getVelocity());
 
         intake.setPower(intakePower);
@@ -297,6 +298,13 @@ public class BasicTeleopLM1 extends OpMode {
      * AimTeleopLM1 overrides this to turn the robot toward the hive while auto-aim is on.
      * Positive = turn clockwise (right), same as pushing the right stick right.
      */
+    // Stick values smaller than this count as zero (stops slow creeping from stick drift).
+    public static double STICK_DEADBAND = 0.05;
+
+    protected static double deadband(double value) {
+        return Math.abs(value) < STICK_DEADBAND ? 0 : value;
+    }
+
     protected double turnCommand(double forward, double strafe, double driverTurn) {
         return driverTurn;
     }
@@ -335,10 +343,10 @@ public class BasicTeleopLM1 extends OpMode {
 
     void launch() {
         // Keep the launcher spinning at the target velocity the whole time teleop is running.
-        launcher.setVelocity(launcherTargetVelocity);
+        launcher.setVelocity(flywheelTarget());
 
         // Check whether the launcher is at its target velocity (shown on telemetry as ready/not ready).
-        launcherAtSpeed = Math.abs(launcher.getVelocity() - launcherTargetVelocity) <= LAUNCHER_VELOCITY_TOLERANCE;
+        launcherAtSpeed = Math.abs(launcher.getVelocity() - flywheelTarget()) <= LAUNCHER_VELOCITY_TOLERANCE;
 
         /*
          * FIRE: hold gamepad 2 right trigger to run every stage (intake + transfer) and push balls
@@ -353,6 +361,14 @@ public class BasicTeleopLM1 extends OpMode {
         } else {
             transfer.setPower(0);
         }
+    }
+
+    /*
+     * Flywheel target speed actually sent to the launcher, in ticks/s. The basic teleop uses
+     * the D-pad-controlled value. AimTeleopLM1 overrides this with distance-based auto speed.
+     */
+    protected int flywheelTarget() {
+        return launcherTargetVelocity;
     }
 
     // Change the flywheel target, kept between 0 and the max.

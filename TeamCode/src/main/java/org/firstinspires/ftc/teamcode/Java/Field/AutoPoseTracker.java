@@ -2,6 +2,7 @@ package org.firstinspires.ftc.teamcode.Java.Field;
 
 import com.pedropathing.math.Pose;
 import com.pedropathing.revhub.localizers.PinpointLocalizer;
+import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
 import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
@@ -28,6 +29,8 @@ public class AutoPoseTracker {
 
     public AutoPoseTracker(HardwareMap hardwareMap) {
         localizer = new PinpointLocalizer(hardwareMap, Constants.localizerConfig);
+        // Recalibrate the gyro while the robot sits still at INIT (prevents heading drift).
+        hardwareMap.get(GoBildaPinpointDriver.class, Constants.localizerConfig.name.get()).recalibrateIMU();
     }
 
     // Call in init_loop(): gamepad 1 X picks Blue, B picks Red. Shows the choice on telemetry.
