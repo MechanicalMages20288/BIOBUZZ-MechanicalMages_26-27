@@ -1,8 +1,5 @@
 package org.firstinspires.ftc.teamcode.pedro.procedures;
 
-import static com.pedropathing.utils.Utils.linearFit;
-import static com.pedropathing.utils.Utils.quadraticFit;
-
 import com.pedropathing.drivetrain.DrivePowers;
 import com.pedropathing.drivetrain.Drivetrain;
 import com.pedropathing.localization.Localizer;
@@ -16,12 +13,11 @@ import com.pedropathing.utils.Utils;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Locale;
+import java.util.*;
 import java.util.function.Function;
+
+import static com.pedropathing.utils.Utils.linearFit;
+import static com.pedropathing.utils.Utils.quadraticFit;
 
 public class ForesightTuner extends Procedure {
     Function<HardwareMap, Localizer> localizerFunction;
@@ -203,7 +199,9 @@ class ForwardVelocity extends TuningOpMode<Double> {
         localizer.setPose(Pose.zero());
         localizer.update();
 
-        while (!end) {
+        long safetyStartNano = System.nanoTime();
+        while (!end && !isStopRequested()) {
+            ForesightSafety.check(safetyStartNano, drivetrain);
             localizer.update();
             if (Math.abs(localizer.pose().x()) > distance) {
                 end = true;
@@ -261,7 +259,9 @@ class StrafeVelocity extends TuningOpMode<Double> {
         localizer.setPose(Pose.zero());
         localizer.update();
 
-        while (!end) {
+        long safetyStartNano = System.nanoTime();
+        while (!end && !isStopRequested()) {
+            ForesightSafety.check(safetyStartNano, drivetrain);
             localizer.update();
             if (Math.abs(localizer.pose().y()) > distance) {
                 end = true;
@@ -324,7 +324,9 @@ class ForwardDeceleration extends TuningOpMode<Double> {
 
         drivetrain.drive(power, false);
 
-        while (!stopping) {
+        long safetyStartNano = System.nanoTime();
+        while (!stopping && !isStopRequested()) {
+            ForesightSafety.check(safetyStartNano, drivetrain);
             localizer.update();
             double currentVelocity = localizer.twist().toVector2D().x();
             if (Math.abs(currentVelocity) > velocity) {
@@ -340,7 +342,7 @@ class ForwardDeceleration extends TuningOpMode<Double> {
 
         boolean end = false;
 
-        while (!end) {
+        while (!end && !isStopRequested()) {
             localizer.update();
             drivetrain.stop(false);
             double currentVelocity = localizer.twist().toVector2D().x();
@@ -418,7 +420,9 @@ class StrafeDeceleration extends TuningOpMode<Double> {
 
         drivetrain.drive(power, false);
 
-        while (!stopping) {
+        long safetyStartNano = System.nanoTime();
+        while (!stopping && !isStopRequested()) {
+            ForesightSafety.check(safetyStartNano, drivetrain);
             localizer.update();
             double currentVelocity = localizer.twist().toVector2D().y();
             if (Math.abs(currentVelocity) > velocity) {
@@ -434,7 +438,7 @@ class StrafeDeceleration extends TuningOpMode<Double> {
 
         boolean end = false;
 
-        while (!end) {
+        while (!end && !isStopRequested()) {
             drivetrain.stop(false);
             localizer.update();
             double currentVelocity = localizer.twist().toVector2D().y();
@@ -1341,3 +1345,21 @@ class StrafeTranslational extends TuningOpMode<List<Double>> {
     }
 }
 
+
+/*
+ * Safety guard added by our team. The velocity and deceleration steps drive at full power until
+ * the localizer reports a distance or speed. If the localizer isn't reading (Pinpoint not
+ * connected, pods off the floor, wrong config), they would never stop. This stops the robot after
+ * MAX_DRIVE_SECONDS and ends the step with a message instead.
+ */
+class ForesightSafety {
+    public static double MAX_DRIVE_SECONDS = 4;
+
+    static void check(long startNano, Drivetrain drivetrain) {
+        if ((System.nanoTime() - startNano) / 1e9 > MAX_DRIVE_SECONDS) {
+            drivetrain.stop();
+            throw new RuntimeException("drove for " + MAX_DRIVE_SECONDS + " s without the localizer "
+                    + "reaching the target. Check the Pinpoint is reading with Tests > Pose Test.");
+        }
+    }
+}

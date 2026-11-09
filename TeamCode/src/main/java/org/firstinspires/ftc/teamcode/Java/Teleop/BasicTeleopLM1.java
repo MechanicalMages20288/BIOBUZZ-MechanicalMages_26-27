@@ -51,9 +51,13 @@ import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
  * we will also need to adjust the "PIDF" coefficients with some that are a better fit for our application.
  */
 
-@TeleOp(name = "Mec BioBuzz StarterBot Teleop", group = "StarterBot")
+/*
+ * BasicTeleopLM1: driver control with no odometry. RedTeleopLM1 / BlueTeleopLM1 build on this
+ * class (through AimTeleopLM1) and add hive auto-aim; they change turning via turnCommand().
+ */
+@TeleOp(name = "BasicTeleopLM1", group = "LM1")
 //@Disabled
-public class BioBuzzStarterbotTeleopMecanum extends OpMode {
+public class BasicTeleopLM1 extends OpMode {
 
     // Declare OpMode members.
     private DcMotor leftFrontDrive = null;
@@ -204,7 +208,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
 
         launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
-        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40,  0, 0, 14.4));
+        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40,  0, 0, 17));
 
         /*
          * Pinpoint odometry computer. The name must match the robot configuration.
@@ -255,7 +259,11 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          * Note, moving the joystick forward on most gamepads results in a negative signal, so
          * we invert it before passing it to the function.
          */
-        mecanumDrive(-gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x);
+        // Tiny stick values (resting drift) count as zero so the robot doesn't creep on its own.
+        double forward = deadband(-gamepad1.left_stick_y);
+        double strafe = deadband(gamepad1.left_stick_x);
+        double rotate = turnCommand(forward, strafe, gamepad1.right_stick_x);
+        mecanumDrive(forward, strafe, rotate);
 
         /*
          * Intake: hold A to intake, B to outtake. The transfer is handled in launch(): it runs
@@ -294,7 +302,7 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
          * launcherAtSpeed was just updated inside launch(), so it reflects this loop.
          */
         telemetry.addData("Shooter", launcherAtSpeed ? "READY TO FIRE" : "NOT READY");
-        telemetry.addData("Target velocity", "%d ticks/s", launcherTargetVelocity);
+        telemetry.addData("Target velocity", "%d ticks/s", flywheelTarget());
         telemetry.addData("Actual velocity", "%.0f ticks/s", launcher.getVelocity());
 
         intake.setPower(intakePower);
@@ -329,7 +337,29 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         transfer.setPower(0);
     }
 
+    /*
+     * Turning power for this loop. The basic teleop just uses the driver's right stick.
+     * AimTeleopLM1 overrides this to turn the robot toward the hive while auto-aim is on.
+     * Positive = turn clockwise (right), same as pushing the right stick right.
+     */
+    // Stick values smaller than this count as zero (stops slow creeping from stick drift).
+    public static double STICK_DEADBAND = 0.05;
+
+    protected static double deadband(double value) {
+        return Math.abs(value) < STICK_DEADBAND ? 0 : value;
+    }
+
+    protected double turnCommand(double forward, double strafe, double driverTurn) {
+        return driverTurn;
+    }
+
     void mecanumDrive(double forward, double strafe, double rotate) {
+        /*
+         * Strafe signs on the LEFT side are flipped from the standard mecanum formula. On this
+         * robot the left front/back motors are swapped, so the standard formula made the two
+         * sides push sideways against each other and the robot couldn't strafe.
+         * If strafing now goes the wrong way, flip the strafe input in loop() instead.
+         */
         leftFrontPower = forward - strafe + rotate;
         rightFrontPower = forward - strafe - rotate;
         leftBackPower = forward + strafe + rotate;
@@ -357,10 +387,10 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
 
     void launch() {
         // Keep the launcher spinning at the target velocity the whole time teleop is running.
-        launcher.setVelocity(launcherTargetVelocity);
+        launcher.setVelocity(flywheelTarget());
 
         // Check whether the launcher is at its target velocity (shown on telemetry as ready/not ready).
-        launcherAtSpeed = Math.abs(launcher.getVelocity() - launcherTargetVelocity) <= LAUNCHER_VELOCITY_TOLERANCE;
+        launcherAtSpeed = Math.abs(launcher.getVelocity() - flywheelTarget()) <= LAUNCHER_VELOCITY_TOLERANCE;
 
         /*
          * FIRE: hold gamepad 2 right trigger to run every stage (intake + transfer) and push balls
@@ -375,6 +405,14 @@ public class BioBuzzStarterbotTeleopMecanum extends OpMode {
         } else {
             transfer.setPower(0);
         }
+    }
+
+    /*
+     * Flywheel target speed actually sent to the launcher, in ticks/s. The basic teleop uses
+     * the D-pad-controlled value. AimTeleopLM1 overrides this with distance-based auto speed.
+     */
+    protected int flywheelTarget() {
+        return launcherTargetVelocity;
     }
 
     // Change the flywheel target, kept between 0 and the max.

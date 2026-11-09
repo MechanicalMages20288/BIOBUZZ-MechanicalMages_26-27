@@ -7,6 +7,8 @@ import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
+import org.firstinspires.ftc.teamcode.Java.Field.AutoPoseTracker;
+
 /*
  * Autonomous for the goBILDA StarterBot with MECANUM wheels (BIOBUZZ 2026-2027).
  *
@@ -31,6 +33,9 @@ public class BioBuzzStarterBotLeave extends OpMode {
 
     private final ElapsedTime moveTimer = new ElapsedTime();
     private final ElapsedTime autoTimer = new ElapsedTime();
+
+    // Tracks position with the Pinpoint and hands it to RedTeleopLM1 / BlueTeleopLM1.
+    private AutoPoseTracker poseTracker;
 
     private DcMotor leftFrontDrive = null;
     private DcMotor rightFrontDrive = null;
@@ -73,20 +78,27 @@ public class BioBuzzStarterBotLeave extends OpMode {
         leftBackDrive.setZeroPowerBehavior(BRAKE);
         rightBackDrive.setZeroPowerBehavior(BRAKE);
 
+        poseTracker = new AutoPoseTracker(hardwareMap);
+
         telemetry.addData("Status", "Initialized");
     }
 
     @Override
     public void init_loop() {
+        // Pick the alliance during INIT: gamepad 1 X = Blue, B = Red (default Red).
+        poseTracker.selectAlliance(gamepad1, telemetry);
+        telemetry.update();
     }
 
     @Override
     public void start() {
         autoTimer.reset();
+        poseTracker.start();
     }
 
     @Override
     public void loop() {
+        poseTracker.update();
         switch (autonomousState) {
             case STRAIGHT:
                 if (drive(STRAIGHT_POWER, STRAIGHT_SECONDS)) {
@@ -106,11 +118,15 @@ public class BioBuzzStarterBotLeave extends OpMode {
 
         telemetry.addData("AutoState", autonomousState);
         telemetry.addData("Auto time", "%.1f s", autoTimer.seconds());
+        telemetry.addData("Pose", "x %.1f, y %.1f, heading %.0f deg (%s)",
+                poseTracker.pose().x(), poseTracker.pose().y(),
+                Math.toDegrees(poseTracker.pose().heading()), poseTracker.alliance());
         telemetry.update();
     }
 
     @Override
     public void stop() {
+        poseTracker.update();
         stopDrive();
     }
 

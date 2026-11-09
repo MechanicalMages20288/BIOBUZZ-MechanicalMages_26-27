@@ -42,13 +42,15 @@ import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
+import org.firstinspires.ftc.teamcode.Java.Field.AutoPoseTracker;
+
 /*
  * Autonomous for the goBILDA StarterBot with MECANUM wheels (BIOBUZZ 2026-2027).
  * Adapted from the tank-drive StarterBotAuto.
  *
  * The robot starts against the alliance wall facing the hive, launches its projectiles, then
  * parks in its alliance's loading zone (see the "Park path" notes below).
- * Hardware names and motor directions match BioBuzzStarterbotTeleopMecanum.
+ * Hardware names and motor directions match BasicTeleopLM1.
  *
  * The drive motors have no encoders, so every move is TIMED: the wheels run at a set power
  * for a set number of seconds. Distances change with battery level and floor grip, so tune
@@ -104,6 +106,9 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
 
     private final ElapsedTime moveTimer = new ElapsedTime();
     private final ElapsedTime autoTimer = new ElapsedTime();
+
+    // Tracks position with the Pinpoint and hands it to RedTeleopLM1 / BlueTeleopLM1.
+    private AutoPoseTracker poseTracker;
 
     private DcMotor leftFrontDrive = null;
     private DcMotor rightFrontDrive = null;
@@ -167,20 +172,27 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
         launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 14.4));
 
 
+        poseTracker = new AutoPoseTracker(hardwareMap);
+
         telemetry.addData("Status", "Initialized");
     }
 
     @Override
     public void init_loop() {
+        // Pick the alliance during INIT: gamepad 1 X = Blue, B = Red (default Red).
+        poseTracker.selectAlliance(gamepad1, telemetry);
+        telemetry.update();
     }
 
     @Override
     public void start() {
         autoTimer.reset();
+        poseTracker.start();
     }
 
     @Override
     public void loop() {
+        poseTracker.update();
         intakePower = 0;
 
         switch (autonomousState) {
@@ -214,11 +226,15 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
         telemetry.addData("Auto time", "%.1f s", autoTimer.seconds());
         telemetry.addData("Launcher velocity", "target %d, actual %.0f ticks/s",
                 LAUNCHER_TARGET_VELOCITY, launcher.getVelocity());
+        telemetry.addData("Pose", "x %.1f, y %.1f, heading %.0f deg (%s)",
+                poseTracker.pose().x(), poseTracker.pose().y(),
+                Math.toDegrees(poseTracker.pose().heading()), poseTracker.alliance());
         telemetry.update();
     }
 
     @Override
     public void stop() {
+        poseTracker.update();
         stopDrive();
         launcher.setVelocity(0);
         transfer.setPower(0);
@@ -253,10 +269,11 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
 
     /**
      * Strafe sideways. Positive power = right, negative = left.
-     * Matches the teleop: LF +, RF -, LB -, RB + strafes right.
+     * Matches the teleop: the left side's strafe signs are flipped because this robot's left
+     * front/back motors are swapped (LF -, RF -, LB +, RB +).
      */
     boolean strafe(double power, double seconds) {
-        return timedMove(power, -power, -power, power, seconds);
+        return timedMove(-power, -power, power, power, seconds);
     }
 
     /**
