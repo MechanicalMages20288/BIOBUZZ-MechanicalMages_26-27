@@ -17,6 +17,7 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.teamcode.Java.Field.FieldLM1;
 import org.firstinspires.ftc.teamcode.Java.Field.PoseStorage;
+import org.firstinspires.ftc.teamcode.Java.Shooter.FireFeedforward;
 import org.firstinspires.ftc.teamcode.Java.Shooter.FlywheelSpeedModel;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
 
@@ -98,6 +99,9 @@ public abstract class PedroAutoLM1 extends OpMode {
     private double flywheelTarget = IDLE_FLYWHEEL_VELOCITY;
     private double intakePower = 0;
     private double transferPower = 0;
+    // True while a Shoot step is feeding balls; FireFeedforward boosts the flywheel after ball 1.
+    private boolean firing = false;
+    private final FireFeedforward fireFeedforward = new FireFeedforward();
     private final ElapsedTime autoTimer = new ElapsedTime();
 
     @Override
@@ -143,6 +147,7 @@ public abstract class PedroAutoLM1 extends OpMode {
         follower.update();
         intakePower = 0;
         transferPower = 0;
+        firing = false;
 
         String stepName = "DONE";
         if (stepIndex < steps.size()) {
@@ -158,7 +163,7 @@ public abstract class PedroAutoLM1 extends OpMode {
             }
         }
 
-        launcher.setVelocity(flywheelTarget);
+        launcher.setVelocity(fireFeedforward.command((int) Math.round(flywheelTarget), launcher.getVelocity(), firing));
         intake.setPower(intakePower);
         transfer.setPower(transferPower);
 
@@ -307,6 +312,7 @@ public abstract class PedroAutoLM1 extends OpMode {
             }
             transferPower = TRANSFER_FEED_POWER;
             intakePower = INTAKE_FIRE_POWER;
+            firing = true;
             return feedTimer.seconds() > FEED_SECONDS;
         }
     }

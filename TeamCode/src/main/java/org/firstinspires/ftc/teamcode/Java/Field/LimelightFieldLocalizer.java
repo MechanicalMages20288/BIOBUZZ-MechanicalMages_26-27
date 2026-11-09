@@ -28,6 +28,13 @@ import org.firstinspires.ftc.teamcode.Java.Teleop.LimelightPositionLM1;
  * After a long gap with no fixes, the first good reading is trusted fully (snap).
  * Otherwise readings are blended in, so one noisy frame doesn't make aiming twitch.
  *
+ * LOST TAGS: when the Limelight loses the tags (or a frame is ignored), the pose is HELD at the
+ * last Limelight position for up to HOLD_SECONDS (1.5 s), instead of switching to odometry
+ * right away. This covers short dropouts, e.g. a ball blocking the camera while shooting.
+ * After HOLD_SECONDS the Pinpoint odometry takes over from that position. The hold also ends
+ * early if odometry says the robot has really moved (HOLD_MAX_MOVE_IN / HOLD_MAX_TURN_DEG),
+ * because then the held position would be wrong.
+ *
  * Uses the same pipeline (uploaded at INIT) and frame conversion as LimelightPositionLM1.
  */
 public class LimelightFieldLocalizer {
@@ -45,12 +52,25 @@ public class LimelightFieldLocalizer {
     public static double MIN_WRITE_IN = 0.2;         // skip tiny corrections (saves Pinpoint writes)
     public static double MIN_WRITE_DEG = 0.3;
 
+    // Hold the last Limelight position this long after losing the tags, before using odometry.
+    public static double HOLD_SECONDS = 1.5;
+    // ...but stop holding early once odometry says the robot moved/turned this much since then.
+    public static double HOLD_MAX_MOVE_IN = 8;
+    public static double HOLD_MAX_TURN_DEG = 20;
+
     private static final double METERS_TO_INCHES = 39.3701;
 
     private final Limelight3A limelight;
     private final boolean pipelineUploaded;
     private final ElapsedTime sinceFix = new ElapsedTime();
     private boolean hasFix = false;
+
+    // Last Limelight position (after blending) and how far odometry has moved since, for the hold.
+    private Pose heldPose = null;
+    private double movedSinceFixIn = 0;
+    private double turnedSinceFixDeg = 0;
+    private boolean holding = false;
+    private Pose lastCorrected = null;
 
     // Latest info, for telemetry.
     private Pose lastReading = null;
@@ -107,6 +127,41 @@ public class LimelightFieldLocalizer {
      * Returns true if a correction was applied.
      */
     public boolean correct(Localizer localizer, double turnRateDegS, double speedInS) {
+        boolean fixed = applyReading(localizer, turnRateDegS, speedInS);
+        if (fixed) {
+            heldPose = lastCorrected;
+            movedSinceFixIn = 0;
+            turnedSinceFixDeg = 0;
+            holding = false;
+        } else {
+            hold(localizer);
+        }
+        return fixed;
+    }
+
+    /*
+     * No fix this loop: keep the pose at the last Limelight position for up to HOLD_SECONDS.
+     * The pose was set to heldPose last loop, so its difference now is this loop's odometry
+     * motion; that's added up so the hold can end early if the robot really moves.
+     */
+    private void hold(Localizer localizer) {
+        holding = false;
+        if (heldPose == null || !hasFix || sinceFix.seconds() > HOLD_SECONDS) {
+            heldPose = null; // past the hold: odometry carries on from here
+            return;
+        }
+        Pose current = localizer.pose();
+        movedSinceFixIn += current.distance(heldPose);
+        turnedSinceFixDeg += Math.abs(Math.toDegrees(wrap(current.heading() - heldPose.heading())));
+        if (movedSinceFixIn > HOLD_MAX_MOVE_IN || turnedSinceFixDeg > HOLD_MAX_TURN_DEG) {
+            heldPose = null; // robot moved: the held position is out of date, use odometry
+            return;
+        }
+        localizer.setPose(heldPose);
+        holding = true;
+    }
+
+    private boolean applyReading(Localizer localizer, double turnRateDegS, double speedInS) {
         Pose reading = readPose();
         if (reading == null) {
             if (lastTagCount == 0) status = "no tags in view";
@@ -143,6 +198,7 @@ public class LimelightFieldLocalizer {
         if (worthWriting) {
             localizer.setPose(corrected);
         }
+        lastCorrected = corrected;
         hasFix = true;
         sinceFix.reset();
         acceptedCount++;
@@ -176,6 +232,11 @@ public class LimelightFieldLocalizer {
 
     public double tagDistanceIn() {
         return lastTagDistanceIn;
+    }
+
+    // True while the pose is being held at the last Limelight position (tags just lost).
+    public boolean holding() {
+        return holding;
     }
 
     public Pose lastReading() {

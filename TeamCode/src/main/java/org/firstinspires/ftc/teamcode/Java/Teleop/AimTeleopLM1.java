@@ -77,15 +77,17 @@ public abstract class AimTeleopLM1 extends BasicTeleopLM1 {
     @Override
     public void init() {
         super.init();
-        localizer = new PinpointLocalizer(hardwareMap, Constants.localizerConfig);
+        if (usePinpoint()) {
+            localizer = new PinpointLocalizer(hardwareMap, Constants.localizerConfig);
 
-        /*
-         * Recalibrate the Pinpoint's gyro now, while the robot is sitting still at INIT.
-         * A bad gyro calibration makes heading drift, which drags x/y off as you drive.
-         * KEEP THE ROBOT STILL during INIT. The position is set again at START.
-         */
-        pinpoint = hardwareMap.get(GoBildaPinpointDriver.class, Constants.localizerConfig.name.get());
-        pinpoint.recalibrateIMU();
+            /*
+             * Recalibrate the Pinpoint's gyro now, while the robot is sitting still at INIT.
+             * A bad gyro calibration makes heading drift, which drags x/y off as you drive.
+             * KEEP THE ROBOT STILL during INIT. The position is set again at START.
+             */
+            pinpoint = hardwareMap.get(GoBildaPinpointDriver.class, Constants.localizerConfig.name.get());
+            pinpoint.recalibrateIMU();
+        }
 
         if (PoseStorage.lastPose != null && PoseStorage.alliance == alliance()) {
             startPose = PoseStorage.lastPose;
@@ -94,7 +96,7 @@ public abstract class AimTeleopLM1 extends BasicTeleopLM1 {
             startPose = FieldLM1.autoStartPose(alliance());
             poseSource = "default auto start spot (no auto ran)";
         }
-        localizer.setPose(startPose);
+        setRobotPose(startPose);
     }
 
     @Override
@@ -108,7 +110,7 @@ public abstract class AimTeleopLM1 extends BasicTeleopLM1 {
     public void start() {
         super.start();
         // Set again at START in case the Pinpoint was still resetting during INIT.
-        localizer.setPose(startPose);
+        setRobotPose(startPose);
         PoseStorage.clear();
     }
 
@@ -123,23 +125,51 @@ public abstract class AimTeleopLM1 extends BasicTeleopLM1 {
     protected void extraTelemetry() {
     }
 
-    @Override
-    public void loop() {
+    /*
+     * POSITION HOOKS. By default the position is the Pinpoint's (corrected by correctPose()).
+     * The Limelight-only teleops override these to use the camera alone.
+     */
+    // Update the position for this loop.
+    protected void updatePose() {
         localizer.update();
         correctPose();
+    }
+
+    // The robot's current field position, or null if it isn't known right now.
+    protected Pose currentPose() {
+        return localizer.pose();
+    }
+
+    // Set the robot's position (start pose, corner buttons).
+    protected void setRobotPose(Pose pose) {
+        localizer.setPose(pose);
+    }
+
+    // True if the position is fresh enough to steer by (auto-aim cancels when it isn't).
+    protected boolean poseGoodForAiming() {
+        return true;
+    }
+
+    @Override
+    public void loop() {
+        updatePose();
         handleDriverButtons();
 
         // Distance to the target cell, used for auto flywheel speed in flywheelTarget().
-        Pose current = localizer.pose();
-        distanceToCell = current.distance(chooseCell(current));
+        Pose current = currentPose();
+        if (current != null) {
+            distanceToCell = current.distance(chooseCell(current));
+        }
 
         // BasicTeleopLM1 drives and runs the shooter; it calls turnCommand() and
         // flywheelTarget() below.
         super.loop();
 
-        Pose pose = localizer.pose();
+        Pose pose = currentPose();
         telemetry.addLine();
-        if (autoSpeed) {
+        if (autoSpeed && pose == null) {
+            telemetry.addData("Flywheel speed", "MANUAL %d ticks/s (no position, so no auto speed)", flywheelTarget());
+        } else if (autoSpeed) {
             int trim = launcherTargetVelocity - LAUNCHER_DEFAULT_VELOCITY;
             telemetry.addData("Flywheel speed", "AUTO %d + trim %d = %d ticks/s  (near/far x%.2f)%s",
                     FlywheelSpeedModel.velocityForDistance(distanceToCell), trim, flywheelTarget(),
@@ -149,19 +179,25 @@ public abstract class AimTeleopLM1 extends BasicTeleopLM1 {
             telemetry.addData("Flywheel speed", "MANUAL %d ticks/s (gamepad 2 Y for auto)", flywheelTarget());
         }
         telemetry.addData("Auto-aim", aiming ? "TURNING" : (aligned ? "ALIGNED (stopped)" : "off (tap A)"));
-        telemetry.addData("Target cell", "%s%s", cellName(pose), flipTarget ? " (X override)" : "");
-        if (activeCell != null) {
-            telemetry.addData("Distance to cell", "%.1f in", pose.distance(activeCell));
+        if (pose == null) {
+            telemetry.addData("Pose", "NO POSITION");
+        } else {
+            telemetry.addData("Target cell", "%s%s", cellName(pose), flipTarget ? " (X override)" : "");
+            if (activeCell != null) {
+                telemetry.addData("Distance to cell", "%.1f in", pose.distance(activeCell));
+            }
+            telemetry.addData("Heading error", "%.1f deg", Math.toDegrees(headingErrorRad));
+            telemetry.addData("Pose", formatPose(pose));
         }
-        telemetry.addData("Heading error", "%.1f deg", Math.toDegrees(headingErrorRad));
-        telemetry.addData("Pose", formatPose(pose));
 
         // Pinpoint health: any non-READY moment (e.g. a bad read) can make the position jump.
-        GoBildaPinpointDriver.DeviceStatus status = pinpoint.getDeviceStatus();
-        if (status != GoBildaPinpointDriver.DeviceStatus.READY) {
-            pinpointProblemCount++;
+        if (usePinpoint()) {
+            GoBildaPinpointDriver.DeviceStatus status = pinpoint.getDeviceStatus();
+            if (status != GoBildaPinpointDriver.DeviceStatus.READY) {
+                pinpointProblemCount++;
+            }
+            telemetry.addData("Pinpoint", "%s   (problems seen: %d)", status, pinpointProblemCount);
         }
-        telemetry.addData("Pinpoint", "%s   (problems seen: %d)", status, pinpointProblemCount);
 
         extraTelemetry();
     }
@@ -177,10 +213,10 @@ public abstract class AimTeleopLM1 extends BasicTeleopLM1 {
             flipTarget = !flipTarget;
         }
         if (gamepad1.dpad_left && !prevDpadLeft) {
-            localizer.setPose(FieldLM1.audienceCornerPose(alliance()));
+            setRobotPose(FieldLM1.audienceCornerPose(alliance()));
         }
         if (gamepad1.dpad_right && !prevDpadRight) {
-            localizer.setPose(FieldLM1.farCornerPose(alliance()));
+            setRobotPose(FieldLM1.farCornerPose(alliance()));
         }
         if (gamepad2.y && !prevY2) {
             autoSpeed = !autoSpeed;
@@ -195,7 +231,12 @@ public abstract class AimTeleopLM1 extends BasicTeleopLM1 {
 
     @Override
     protected double turnCommand(double forward, double strafe, double driverTurn) {
-        Pose pose = localizer.pose();
+        Pose pose = currentPose();
+        // No position (or too old to steer by): auto-aim can't work, the driver keeps control.
+        if (pose == null || !poseGoodForAiming()) {
+            aiming = false;
+            return Math.abs(driverTurn) < TURN_DEADBAND ? 0 : driverTurn;
+        }
         activeCell = chooseCell(pose);
 
         // Heading that points the robot's BACK at the cell: face the cell, then add 180 deg.
@@ -249,7 +290,7 @@ public abstract class AimTeleopLM1 extends BasicTeleopLM1 {
      */
     @Override
     protected int flywheelTarget() {
-        if (!autoSpeed) {
+        if (!autoSpeed || currentPose() == null) {
             return launcherTargetVelocity;
         }
         int trim = launcherTargetVelocity - LAUNCHER_DEFAULT_VELOCITY;

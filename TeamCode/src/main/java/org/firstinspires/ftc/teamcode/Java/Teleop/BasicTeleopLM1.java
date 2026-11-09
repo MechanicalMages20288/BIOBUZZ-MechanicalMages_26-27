@@ -35,6 +35,8 @@ import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
+import org.firstinspires.ftc.teamcode.Java.Shooter.FireFeedforward;
+import org.firstinspires.ftc.teamcode.Java.Shooter.FlywheelSpeedModel;
 
 /*
  * This file includes a teleop (driver-controlled) file for the goBILDA® StarterBot with Mecanum
@@ -85,7 +87,7 @@ public class BasicTeleopLM1 extends OpMode {
      *   Right trigger (hold)  FIRE: intake + transfer together, feeding balls into the flywheel
      *   D-pad right / left    flywheel speed +25 / -25 ticks/s
      *   D-pad up              flywheel speed +100 ticks/s
-     *   D-pad down            reset flywheel speed to the default (1650)
+     *   D-pad down            reset flywheel speed to the default (1425)
      * The flywheel spins the whole time teleop is running.
      */
 
@@ -117,8 +119,14 @@ public class BasicTeleopLM1 extends OpMode {
      * no load (2800 ticks/s = 6000 RPM). With the flywheel on it tops out a bit below that.
      */
     final int LAUNCHER_MAX_VELOCITY = 2800;
-    public final int LAUNCHER_DEFAULT_VELOCITY = 1650; // tuned with FlywheelPIDFTuner
+    // 1500 = tested good shot from ~29 in (launcher to goal), with F = 14.4. FireFeedforward keeps
+    // 4-ball bursts even.
+    // Plus the blanket trim in FlywheelSpeedModel (-75), so 1425.
+    public final int LAUNCHER_DEFAULT_VELOCITY = 1500 + FlywheelSpeedModel.BLANKET_TRIM_TPS;
     public int launcherTargetVelocity = LAUNCHER_DEFAULT_VELOCITY;
+
+    // Raises the flywheel target during a burst so balls 2-4 land with ball 1.
+    final FireFeedforward fireFeedforward = new FireFeedforward();
     public final int LAUNCHER_MIN_VELOCITY = 1000;
 
     // How close (in ticks/s) the launcher must be to the target to count as "at speed".
@@ -208,7 +216,7 @@ public class BasicTeleopLM1 extends OpMode {
 
         launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
-        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40,  0, 0, 17));
+        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 14.4)); // same as the autos
 
         /*
          * Pinpoint odometry computer. The name must match the robot configuration.
@@ -216,13 +224,15 @@ public class BasicTeleopLM1 extends OpMode {
          * Directions: the X pod must count UP when the robot drives forward, and the Y pod must
          * count UP when the robot strafes LEFT. If one counts the wrong way, flip it to REVERSED.
          */
-        pinpoint = hardwareMap.get(GoBildaPinpointDriver.class, "pinpoint");
-        pinpoint.setOffsets(X_POD_OFFSET_MM, Y_POD_OFFSET_MM, DistanceUnit.MM);
-        pinpoint.setEncoderResolution(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD);
-        pinpoint.setEncoderDirections(GoBildaPinpointDriver.EncoderDirection.FORWARD,
-                                      GoBildaPinpointDriver.EncoderDirection.FORWARD);
-        // Sets position to (0, 0) and heading to 0, and recalibrates the IMU. Robot must be still during INIT.
-        pinpoint.resetPosAndIMU();
+        if (usePinpoint()) {
+            pinpoint = hardwareMap.get(GoBildaPinpointDriver.class, "pinpoint");
+            pinpoint.setOffsets(X_POD_OFFSET_MM, Y_POD_OFFSET_MM, DistanceUnit.MM);
+            pinpoint.setEncoderResolution(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD);
+            pinpoint.setEncoderDirections(GoBildaPinpointDriver.EncoderDirection.FORWARD,
+                                          GoBildaPinpointDriver.EncoderDirection.FORWARD);
+            // Sets position to (0, 0) and heading to 0, and recalibrates the IMU. Robot must be still during INIT.
+            pinpoint.resetPosAndIMU();
+        }
 
         /*
          * Tell the driver that initialization is complete.
@@ -304,6 +314,12 @@ public class BasicTeleopLM1 extends OpMode {
         telemetry.addData("Shooter", launcherAtSpeed ? "READY TO FIRE" : "NOT READY");
         telemetry.addData("Target velocity", "%d ticks/s", flywheelTarget());
         telemetry.addData("Actual velocity", "%.0f ticks/s", launcher.getVelocity());
+        telemetry.addData("Fire boost", fireFeedforward.boosting()
+                        ? String.format("ON +%.0f ticks/s", fireFeedforward.boost()) : "off");
+        if (!Double.isNaN(fireFeedforward.lowestLastBurst())) {
+            telemetry.addData("Last burst", "lowest %.0f ticks/s (started at %.0f)",
+                    fireFeedforward.lowestLastBurst(), fireFeedforward.readySpeed());
+        }
 
         intake.setPower(intakePower);
 
@@ -313,14 +329,16 @@ public class BasicTeleopLM1 extends OpMode {
          * is positive, turning right is negative, from -180 to 180.
          * Gamepad 1 BACK resets position to (0, 0) and heading to 0 without recalibrating the IMU.
          */
-        if (gamepad1.back) {
-            pinpoint.setPosition(new Pose2D(DistanceUnit.INCH, 0, 0, AngleUnit.DEGREES, 0));
+        if (usePinpoint()) {
+            if (gamepad1.back) {
+                pinpoint.setPosition(new Pose2D(DistanceUnit.INCH, 0, 0, AngleUnit.DEGREES, 0));
+            }
+            pinpoint.update();
+            Pose2D pose = pinpoint.getPosition();
+            telemetry.addData("Position", "X %.1f in, Y %.1f in", pose.getX(DistanceUnit.INCH), pose.getY(DistanceUnit.INCH));
+            telemetry.addData("Heading", "%.1f deg", pose.getHeading(AngleUnit.DEGREES));
+            telemetry.addData("Pinpoint", pinpoint.getDeviceStatus());
         }
-        pinpoint.update();
-        Pose2D pose = pinpoint.getPosition();
-        telemetry.addData("Position", "X %.1f in, Y %.1f in", pose.getX(DistanceUnit.INCH), pose.getY(DistanceUnit.INCH));
-        telemetry.addData("Heading", "%.1f deg", pose.getHeading(AngleUnit.DEGREES));
-        telemetry.addData("Pinpoint", pinpoint.getDeviceStatus());
 
         /*
          * Show motor powers on the Driver Station via telemetry.
@@ -351,6 +369,14 @@ public class BasicTeleopLM1 extends OpMode {
 
     protected double turnCommand(double forward, double strafe, double driverTurn) {
         return driverTurn;
+    }
+
+    /*
+     * Whether this teleop uses the Pinpoint at all. The Limelight-only teleops return false,
+     * so the Pinpoint is never opened, reset or read.
+     */
+    protected boolean usePinpoint() {
+        return true;
     }
 
     void mecanumDrive(double forward, double strafe, double rotate) {
@@ -386,17 +412,23 @@ public class BasicTeleopLM1 extends OpMode {
     }
 
     void launch() {
-        // Keep the launcher spinning at the target velocity the whole time teleop is running.
-        launcher.setVelocity(flywheelTarget());
+        boolean firing = gamepad2.right_trigger > FIRE_TRIGGER_THRESHOLD;
+        double actual = launcher.getVelocity();
+
+        /*
+         * Keep the launcher spinning at the target velocity the whole time teleop is running.
+         * While firing, FireFeedforward raises it after the first ball so balls 2-4 don't go short.
+         */
+        launcher.setVelocity(fireFeedforward.command(flywheelTarget(), actual, firing));
 
         // Check whether the launcher is at its target velocity (shown on telemetry as ready/not ready).
-        launcherAtSpeed = Math.abs(launcher.getVelocity() - flywheelTarget()) <= LAUNCHER_VELOCITY_TOLERANCE;
+        launcherAtSpeed = Math.abs(actual - flywheelTarget()) <= LAUNCHER_VELOCITY_TOLERANCE;
 
         /*
          * FIRE: hold gamepad 2 right trigger to run every stage (intake + transfer) and push balls
          * into the flywheel. This overrides A/B for the intake while held.
          */
-        if (gamepad2.right_trigger > FIRE_TRIGGER_THRESHOLD) {
+        if (firing) {
             transfer.setPower(TRANSFER_FEED_POWER);
             intakePower = INTAKE_FIRE_POWER;
         } else if (gamepad2.b) {

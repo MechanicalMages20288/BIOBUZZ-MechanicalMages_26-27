@@ -19,8 +19,7 @@ package org.firstinspires.ftc.teamcode.Java.Shooter;
  * TO TUNE (most important first):
  *   1. LAUNCH_ANGLE_DEG: measure the ball's exit angle up from the floor.
  *   2. TARGET_HEIGHT_IN: measure the height of the tipped-up cell's opening.
- *   3. CALIBRATION_DISTANCE_IN: park at your best spot (1600 scores ~90%), read
- *      "Distance to cell" on telemetry, and put that number here.
+ *   3. CALIBRATION_VELOCITY / FLAT_ZONE: the tested shot (1500 at 27-31 in from the launcher).
  */
 public final class FlywheelSpeedModel {
 
@@ -39,17 +38,37 @@ public final class FlywheelSpeedModel {
     // Robot center to launcher, along the robot (launcher is at the back).
     public static double RANGE_OFFSET_IN = 9;
 
-    // Known-good shot: 30 in from the goal (+9 in to robot center) at about 1550 ticks/s.
-    public static double CALIBRATION_DISTANCE_IN = 39;
-    public static double CALIBRATION_VELOCITY = 1550;
+    /*
+     * Known-good shot (tested in BasicTeleopLM1): launcher 29 in from the goal (= 38 in from the
+     * robot center) with the wheel actually running ~1520 ticks/s (target 1450 with F = 17).
+     * The launcher now uses F = 14.4 everywhere, which holds closer to the target, so the target
+     * is 1500 to get that same ~1520. One ball landed well; the 4-ball drop-off is handled by the firing feedforward (FireFeedforward), not here.
+     *
+     * FLAT ZONE: anywhere from launcher 27 to 31 in (robot center 36 to 40 in) uses exactly
+     * CALIBRATION_VELOCITY. Outside it, the physics model is scaled from the zone's edge, so the
+     * speed changes smoothly with no jump at the edges.
+     */
+    public static double CALIBRATION_DISTANCE_IN = 38;
+    public static double CALIBRATION_VELOCITY = 1500;
+    public static double FLAT_ZONE_MIN_IN = 36;
+    public static double FLAT_ZONE_MAX_IN = 40;
 
     /*
      * Limits on the auto speed. A goBILDA 6000 RPM bare motor tops out around 2800 ticks/s
      * with no load, so stay below that.
      */
-    // Blanket scale on top of the model, applied to every distance. 1.0 = off.
-    // Was 1.05 (+5%); the team then asked for 93% of that: 1.05 x 0.93 = 0.9765.
-    public static double SPEED_MULTIPLIER = 0.9765;
+    /*
+     * Blanket scale on top of the model, applied to every distance. 1.0 = off. The old 0.9765
+     * (+5% then 93%) is now built into the 1500 calibration, so this is back to 1.0. Use it to
+     * nudge every distance at once (e.g. 1.02 = 2% faster everywhere).
+     */
+    public static double SPEED_MULTIPLIER = 1.0;
+
+    /*
+     * Blanket trim (ticks/s) added to EVERY shot: the auto speed here, BasicTeleopLM1's default
+     * speed, and the Pedro auto. -75 = every shot 75 ticks/s slower.
+     */
+    public static int BLANKET_TRIM_TPS = -75;
 
     /*
      * Near/far correction from testing: shots closer than the split were slightly short,
@@ -58,9 +77,9 @@ public final class FlywheelSpeedModel {
      * jump when you drive across the line.
      */
     public static double NEAR_FAR_SPLIT_IN = 18;
-    public static double SPLIT_BLEND_IN = 4;     // blend from 16 to 20 in
-    public static double NEAR_MULTIPLIER = 1.07; // +7% when close
-    public static double FAR_MULTIPLIER = 0.93;  // -7% when far
+    public static double SPLIT_BLEND_IN = 2;     // blend from 16 to 20 in
+    public static double NEAR_MULTIPLIER = 0.80; // +7% when close
+    public static double FAR_MULTIPLIER = 0.80;  // -7% when far
 
     public static double MIN_VELOCITY = 1200;
     public static double MAX_VELOCITY = 2600;
@@ -72,16 +91,22 @@ public final class FlywheelSpeedModel {
      * Too close to reach the cell at this angle -> MAX_VELOCITY.
      */
     public static int velocityForDistance(double distanceIn) {
-        double needed = exitSpeed(distanceIn - RANGE_OFFSET_IN);
-        double atCalibration = exitSpeed(CALIBRATION_DISTANCE_IN - RANGE_OFFSET_IN);
-
         double velocity;
-        if (Double.isNaN(needed) || Double.isNaN(atCalibration)) {
-            velocity = MAX_VELOCITY;
+        if (distanceIn >= FLAT_ZONE_MIN_IN && distanceIn <= FLAT_ZONE_MAX_IN) {
+            // Inside the tested zone: use the tested speed.
+            velocity = CALIBRATION_VELOCITY * SPEED_MULTIPLIER;
         } else {
-            velocity = CALIBRATION_VELOCITY * needed / atCalibration * SPEED_MULTIPLIER
-                    * nearFarMultiplier(distanceIn);
+            // Outside: scale the physics model from the nearest zone edge.
+            double edge = distanceIn < FLAT_ZONE_MIN_IN ? FLAT_ZONE_MIN_IN : FLAT_ZONE_MAX_IN;
+            double needed = exitSpeed(distanceIn - RANGE_OFFSET_IN) * nearFarMultiplier(distanceIn);
+            double atEdge = exitSpeed(edge - RANGE_OFFSET_IN) * nearFarMultiplier(edge);
+            if (Double.isNaN(needed) || Double.isNaN(atEdge)) {
+                velocity = MAX_VELOCITY;
+            } else {
+                velocity = CALIBRATION_VELOCITY * needed / atEdge * SPEED_MULTIPLIER;
+            }
         }
+        velocity += BLANKET_TRIM_TPS;
         velocity = Math.max(MIN_VELOCITY, Math.min(MAX_VELOCITY, velocity));
         return (int) Math.round(velocity);
     }

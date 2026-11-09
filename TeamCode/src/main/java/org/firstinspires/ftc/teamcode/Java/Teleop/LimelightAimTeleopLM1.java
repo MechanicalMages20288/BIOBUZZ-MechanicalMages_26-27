@@ -17,6 +17,9 @@ import org.firstinspires.ftc.teamcode.Java.Field.LimelightFieldLocalizer;
  * while the robot faces away from the hive, so you can swing roughly toward the hive; once the
  * camera sees the tags again, the Limelight takes over.
  *
+ * If the tags are lost for a moment, the last Limelight position is held for up to 1.5 s
+ * (LimelightFieldLocalizer.HOLD_SECONDS) before the odometry takes over.
+ *
  * Telemetry "Position source" shows which one is in charge right now.
  */
 public abstract class LimelightAimTeleopLM1 extends AimTeleopLM1 {
@@ -82,6 +85,8 @@ public abstract class LimelightAimTeleopLM1 extends AimTeleopLM1 {
         String source;
         if (since < 0.3) {
             source = "LIMELIGHT";
+        } else if (limelight.holding()) {
+            source = String.format("LIMELIGHT (holding last position, tags lost %.1f s ago)", since);
         } else if (since < ODOMETRY_ONLY_WARNING_SECONDS) {
             source = String.format("odometry (last Limelight fix %.1f s ago)", since);
         } else {
