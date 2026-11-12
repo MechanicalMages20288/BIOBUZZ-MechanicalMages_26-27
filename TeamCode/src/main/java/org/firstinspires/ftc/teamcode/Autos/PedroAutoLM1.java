@@ -29,12 +29,13 @@ import java.util.List;
  *
  * ROUTE (written for RED; Blue is the same route rotated 180 degrees around the field center):
  *   1. Start against the audience wall, back (shooter) toward the hive.
- *   2. Drive to SHOT_1 and shoot the preloads into the audience-side cell.
- *   3. Drive to the corner garden, front (intake) first, and intake.
- *   4. Drive around the left of the hive to SHOT_2 and shoot into the far-side cell.
- *   5. Drive to the top-wall flower, front first, and intake.
- *   6. Back to SHOT_3 and shoot into the far-side cell again.
- *   7. Park in the loading zone.
+ *   2. Shoot the preloads FROM THE START SPOT (turns in place so the back points at the
+ *      audience-side cell) at a fixed SHOT_VELOCITY of 1560 ticks/s, with the same fire
+ *      feedforward as the teleop (balls 2-4 get boosted).
+ *   3. Drive to the corner garden on the wall, front (intake) first, and intake for 2 s.
+ *   4. Back up the red side (paths 3 and 4, shooter first), then drive to the final shot
+ *      spot (path 5, intake first). The intake keeps running to hold the balls.
+ *   5. Turn in place so the BACK (shooter) points straight at the far-side cell, and shoot.
  *
  * Positions are in the FieldLM1 frame (inches): x from the red wall (0) to the blue wall (144),
  * y from the audience side (0) to the far side (144), heading 0 = toward the blue wall, CCW
@@ -48,34 +49,36 @@ public abstract class PedroAutoLM1 extends OpMode {
     protected abstract FieldLM1.Alliance alliance();
 
     // ---------- Route, RED side (x, y, heading in degrees) ----------
-    // Start: front against the audience wall, square to it, back toward the hive.
-    // (Robot center is 12 in from its front edge, so against a wall the center is 12 in off it.)
-    public static double[] START = {44, 12, -90};
-    // Shot spots (x, y). Heading is worked out so the back points at the target cell.
-    public static double[] SHOT_1 = {46, 34};
-    public static double[] SHOT_2 = {52, 112};
-    public static double[] SHOT_3 = {52, 112};
-    // Corner garden: approach, then drive in front first to intake.
-    public static double[] GARDEN_APPROACH = {16, 24, -90};
-    public static double[] GARDEN_INTAKE = {14, 13, -90};
-    // Bend point so the drive to SHOT_2 goes around the left side of the hive.
-    public static double[] AROUND_HIVE = {20, 80};
-    // Top-wall flower: approach, then drive in front first to intake.
-    public static double[] FLOWER_APPROACH = {47.6, 116, 90};
-    public static double[] FLOWER_INTAKE = {47.6, 128, 90};
-    // Park: front into the loading zone on the red wall.
-    public static double[] PARK = {13, 108, 180};
+    /*
+     * Route from the team's Pedro visualizer file (2026-11-11).
+     * Start: front (intake) toward the audience wall, back (shooter) toward the hive, so the
+     * heading is -90 (270). The visualizer file had 90, which would mean the INTAKE faces the
+     * hive; -90 matches "shooter facing the goal".
+     */
+    public static double[] START = {56, 8, -90};
+    // Path 1: to the garden approach, still facing the wall (front first).
+    public static double[] GARDEN_APPROACH = {15.0395, 23.0705, -90};
+    // Path 2: into the wall garden, front (intake) first. Visualizer "tangential" heading =
+    // facing the direction of travel, which is -93.6 deg here.
+    // 4 in deeper into the balls than the visualizer point (14.1896, 9.3797), same direction.
+    public static double[] GARDEN_INTAKE = {13.9416, 5.3877, -93.5521};
+
+    // Path 3: back out of the garden up the red side, shooter (back) first.
+    public static double[] POINT_3 = {26.1485, 63.593, -102.4396};
+    // Path 4: keep going up the red side, shooter first.
+    public static double[] POINT_4 = {27.3506, 117.0332, -91.2886};
+    // Path 5: across to the final shot spot, intake first.
+    public static double[] FINAL_SHOT = {62.3445, 120.1809, 5.14};
 
     // Which cell each shot aims at (true = audience-side cell, false = far-side cell).
-    public static boolean SHOT_1_AUDIENCE_CELL = true;
-    public static boolean SHOT_2_AUDIENCE_CELL = false;
-    public static boolean SHOT_3_AUDIENCE_CELL = false;
+    public static boolean SHOT_AUDIENCE_CELL = true;
+    public static boolean FINAL_SHOT_AUDIENCE_CELL = false;
 
     // ---------- Timing ----------
-    public static double FEED_SECONDS = 2.5;          // how long to run intake + transfer per volley
-    public static double SHOOT_READY_TIMEOUT = 2.0;   // feed anyway if not aimed/at speed by then
-    public static double GARDEN_INTAKE_SECONDS = 1.0; // extra intake time after reaching the garden
-    public static double FLOWER_INTAKE_SECONDS = 1.5; // extra intake time at the flower
+    public static double FEED_SECONDS = 3.5;          // how long to run intake + transfer per volley
+    public static double MIN_SPIN_UP_SECONDS = 2.0;   // always wait at least this long before feeding
+    public static double SHOOT_READY_TIMEOUT = 4.0;   // feed anyway if not aimed/at speed by then
+    public static double GARDEN_INTAKE_SECONDS = 2.0; // extra intake time after reaching the garden
     public static double DRIVE_TIMEOUT = 4.0;         // give up on a drive after this long
     public static double AT_END_INCHES = 2.0;         // a drive is done this close to its end
 
@@ -85,7 +88,8 @@ public abstract class PedroAutoLM1 extends OpMode {
     public static double INTAKE_FIRE_POWER = 1;
     public static double AIM_TOLERANCE_DEG = 3;
     public static double LAUNCHER_TOLERANCE = 50;
-    public static double IDLE_FLYWHEEL_VELOCITY = 1600;
+    // Fixed shot speed (ticks/s), same launcher PIDF (F = 14.4) and fire feedforward as the teleop.
+    public static double SHOT_VELOCITY = 1560;
 
     private Follower follower;
     private DcMotorEx launcher;
@@ -96,7 +100,7 @@ public abstract class PedroAutoLM1 extends OpMode {
     private int stepIndex = 0;
     private boolean stepStarted = false;
 
-    private double flywheelTarget = IDLE_FLYWHEEL_VELOCITY;
+    private double flywheelTarget = SHOT_VELOCITY;
     private double intakePower = 0;
     private double transferPower = 0;
     // True while a Shoot step is feeding balls; FireFeedforward boosts the flywheel after ball 1.
@@ -190,26 +194,19 @@ public abstract class PedroAutoLM1 extends OpMode {
     // ---------- Route ----------
 
     private void buildRoute() {
-        Pose cell1 = cell(SHOT_1_AUDIENCE_CELL);
-        Pose cell2 = cell(SHOT_2_AUDIENCE_CELL);
-        Pose cell3 = cell(SHOT_3_AUDIENCE_CELL);
-        Pose shot1 = aimPose(point(SHOT_1), cell1);
-        Pose shot2 = aimPose(point(SHOT_2), cell2);
-        Pose shot3 = aimPose(point(SHOT_3), cell3);
+        Pose cell = cell(SHOT_AUDIENCE_CELL);
 
-        steps.add(new Drive("Drive to shot 1", shot1, null, false, cell1));
-        steps.add(new Shoot("Shoot preloads", cell1));
+        steps.add(new Shoot("Shoot preloads from start", cell));
         steps.add(new Drive("Drive to garden", pose(GARDEN_APPROACH), null, true, null));
         steps.add(new Drive("Intake garden", pose(GARDEN_INTAKE), null, true, null));
         steps.add(new Wait("Intake garden (wait)", GARDEN_INTAKE_SECONDS, true));
-        steps.add(new Drive("Drive to shot 2", shot2, point(AROUND_HIVE), true, cell2));
-        steps.add(new Shoot("Shoot garden balls", cell2));
-        steps.add(new Drive("Drive to flower", pose(FLOWER_APPROACH), null, true, null));
-        steps.add(new Drive("Intake flower", pose(FLOWER_INTAKE), null, true, null));
-        steps.add(new Wait("Intake flower (wait)", FLOWER_INTAKE_SECONDS, true));
-        steps.add(new Drive("Drive to shot 3", shot3, null, false, cell3));
-        steps.add(new Shoot("Shoot flower balls", cell3));
-        steps.add(new Drive("Park", pose(PARK), null, false, null));
+
+        Pose finalCell = cell(FINAL_SHOT_AUDIENCE_CELL);
+        steps.add(new Drive("Path 3 (back up the side)", pose(POINT_3), null, true, null));
+        steps.add(new Drive("Path 4 (up the side)", pose(POINT_4), null, true, null));
+        steps.add(new Drive("Path 5 (to final shot)", pose(FINAL_SHOT), null, true, null));
+        // Shoot turns in place so the back points straight at the cell, then fires.
+        steps.add(new Shoot("Final shot", finalCell));
     }
 
     // ---------- Steps ----------
@@ -294,7 +291,7 @@ public abstract class PedroAutoLM1 extends OpMode {
             Pose aimed = aimPose(p, cell);
             aimHeading = aimed.heading();
             follower.hold(aimed);
-            flywheelTarget = FlywheelSpeedModel.velocityForDistance(p.distance(cell));
+            flywheelTarget = SHOT_VELOCITY;
             feeding = false;
             readyTimer.reset();
         }
@@ -304,7 +301,8 @@ public abstract class PedroAutoLM1 extends OpMode {
             if (!feeding) {
                 boolean aimed = Math.abs(Math.toDegrees(wrap(aimHeading - follower.pose().heading()))) <= AIM_TOLERANCE_DEG;
                 boolean atSpeed = Math.abs(launcher.getVelocity() - flywheelTarget) <= LAUNCHER_TOLERANCE;
-                if ((aimed && atSpeed) || readyTimer.seconds() > SHOOT_READY_TIMEOUT) {
+                boolean spunUp = readyTimer.seconds() > MIN_SPIN_UP_SECONDS;
+                if ((aimed && atSpeed && spunUp) || readyTimer.seconds() > SHOOT_READY_TIMEOUT) {
                     feeding = true;
                     feedTimer.reset();
                 }

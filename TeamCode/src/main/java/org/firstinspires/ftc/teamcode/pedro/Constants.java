@@ -38,11 +38,13 @@ public class Constants {
         c.frontRightName.set("rightFrontDrive");
         c.backLeftName.set("leftFrontDrive");
         c.backRightName.set("rightBackDrive");
-        c.frontLeftDirection.set(DcMotorSimple.Direction.FORWARD);
-        c.frontRightDirection.set(DcMotorSimple.Direction.REVERSE);
+        c.frontLeftDirection.set(DcMotorSimple.Direction.REVERSE);
+        c.frontRightDirection.set(DcMotorSimple.Direction.FORWARD);
         c.backLeftDirection.set(DcMotorSimple.Direction.REVERSE);
         c.backRightDirection.set(DcMotorSimple.Direction.FORWARD);
     });
+
+
     /*
      * goBILDA Pinpoint with 2 odometry pods. "pinpoint" must match its name in the robot config.
      * Pod type, directions and offsets are PLACEHOLDERS: the Pinpoint Tuner measures them.

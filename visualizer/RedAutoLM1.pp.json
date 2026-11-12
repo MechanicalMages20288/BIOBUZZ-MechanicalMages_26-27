@@ -1,0 +1,85 @@
+{
+  "version": "2.0.0",
+  "timestamp": "2026-11-11T00:00:00.000Z",
+  "startPoint": {
+    "x": 44,
+    "y": 12,
+    "headingDeg": -106.4,
+    "locked": false,
+    "name": "Red start"
+  },
+  "lines": [
+    {
+      "kind": "atomic",
+      "id": "line-red-1",
+      "name": "Drive to garden (after shooting at start)",
+      "endPoint": {
+        "x": 16,
+        "y": 24
+      },
+      "controlPoints": [],
+      "heading": {
+        "type": "linear",
+        "startDeg": -106.4,
+        "endDeg": -90.0
+      },
+      "color": "#1D9E75",
+      "locked": false,
+      "waitBeforeMs": 4000,
+      "waitAfterMs": 0,
+      "waitBeforeName": "Aim + shoot preloads at 1500",
+      "waitAfterName": ""
+    },
+    {
+      "kind": "atomic",
+      "id": "line-red-2",
+      "name": "Intake garden",
+      "endPoint": {
+        "x": 14,
+        "y": 13
+      },
+      "controlPoints": [],
+      "heading": {
+        "type": "constant",
+        "degrees": -90
+      },
+      "color": "#1D9E75",
+      "locked": false,
+      "waitBeforeMs": 0,
+      "waitAfterMs": 1000,
+      "waitBeforeName": "",
+      "waitAfterName": "Intake garden"
+    }
+  ],
+  "shapes": [],
+  "sequence": [
+    {
+      "kind": "path",
+      "lineId": "line-red-1"
+    },
+    {
+      "kind": "path",
+      "lineId": "line-red-2"
+    }
+  ],
+  "fieldPoints": [
+    {
+      "x": 57.88,
+      "y": 59.26,
+      "color": "#E24B4A",
+      "radius": 2
+    }
+  ],
+  "robot": {
+    "forwardVelocity": 36.5,
+    "strafeVelocity": 33.3,
+    "aVelocity": 3.141592653589793,
+    "kFriction": 0.1,
+    "rLength": 24,
+    "rWidth": 24,
+    "safetyMargin": 1,
+    "maxAcceleration": 50,
+    "maxDeceleration": 42.7
+  },
+  "activePaths": []
+}

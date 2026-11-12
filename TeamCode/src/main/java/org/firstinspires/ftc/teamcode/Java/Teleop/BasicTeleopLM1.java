@@ -31,6 +31,7 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
+import com.qualcomm.robotcore.hardware.Servo;
 
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
@@ -69,6 +70,7 @@ public class BasicTeleopLM1 extends OpMode {
     private DcMotorEx launcher = null;
     private DcMotor intake = null;
     private DcMotor transfer = null;
+    private Servo flowerServo = null;
     private GoBildaPinpointDriver pinpoint = null;
 
     /*
@@ -88,6 +90,7 @@ public class BasicTeleopLM1 extends OpMode {
      *   D-pad right / left    flywheel speed +25 / -25 ticks/s
      *   D-pad up              flywheel speed +100 ticks/s
      *   D-pad down            reset flywheel speed to the default (1425)
+     *   X (tap)               flower servo: toggle UP / DOWN (starts UP)
      * The flywheel spins the whole time teleop is running.
      */
 
@@ -142,6 +145,16 @@ public class BasicTeleopLM1 extends OpMode {
     boolean dpadUpWasDown = false;
     boolean dpadDownWasDown = false;
 
+    /*
+     * FLOWER SERVO (Axon). Positions found with the Servo Position Tuner.
+     * The name must match the robot configuration.
+     */
+    public static String FLOWER_SERVO_NAME = "servo";
+    public static double FLOWER_UP_POSITION = 0.31;
+    public static double FLOWER_DOWN_POSITION = 0.86;
+    boolean flowerDown = false;
+    boolean xWasDown = false;
+
     // Whether the launcher is at its target velocity, updated every loop in launch().
     boolean launcherAtSpeed = false;
 
@@ -178,6 +191,7 @@ public class BasicTeleopLM1 extends OpMode {
         launcher = hardwareMap.get(DcMotorEx.class, "launcher");
         // Reverse in code (not by swapping wires) so the motor and its encoder stay matched.
         launcher.setDirection(DcMotorSimple.Direction.REVERSE);
+        flowerServo = hardwareMap.get(Servo.class, FLOWER_SERVO_NAME);
         transfer = hardwareMap.get(DcMotor.class, "transfer");
         // Reversed so positive power feeds balls toward the flywheel.
         transfer.setDirection(DcMotorSimple.Direction.REVERSE);
@@ -252,6 +266,9 @@ public class BasicTeleopLM1 extends OpMode {
      */
     @Override
     public void start() {
+        // Servo doesn't move until START, so it never jumps while the robot is being set up.
+        flowerDown = false;
+        flowerServo.setPosition(FLOWER_UP_POSITION);
     }
 
     /*
@@ -306,6 +323,15 @@ public class BasicTeleopLM1 extends OpMode {
         dpadDownWasDown = gamepad2.dpad_down;
 
         launch();
+
+        // Flower servo: gamepad 2 X toggles up / down.
+        if (gamepad2.x && !xWasDown) {
+            flowerDown = !flowerDown;
+        }
+        xWasDown = gamepad2.x;
+        flowerServo.setPosition(flowerDown ? FLOWER_DOWN_POSITION : FLOWER_UP_POSITION);
+        telemetry.addData("Flower", flowerDown ? "DOWN (%.2f)" : "UP (%.2f)",
+                flowerDown ? FLOWER_DOWN_POSITION : FLOWER_UP_POSITION);
 
         /*
          * Launcher status, shown first so it's at the top of the Driver Station screen.

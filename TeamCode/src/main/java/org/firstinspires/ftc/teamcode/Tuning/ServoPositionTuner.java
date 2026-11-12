@@ -25,7 +25,7 @@ public class ServoPositionTuner extends OpMode {
     public static String SERVO_NAME = "servo";
 
     // Where the servo goes at START. Pick a position the mechanism can reach safely.
-    public static double START_POSITION = 0.5;
+    public static double START_POSITION = 1;
 
     final double BIG_STEP = 0.01;
     final double FINE_STEP = 0.001;
