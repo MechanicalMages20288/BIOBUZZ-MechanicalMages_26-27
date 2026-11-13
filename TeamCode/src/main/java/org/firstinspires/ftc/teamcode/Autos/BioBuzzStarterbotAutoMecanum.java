@@ -43,6 +43,7 @@ import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.teamcode.Java.Field.AutoPoseTracker;
+import org.firstinspires.ftc.teamcode.Java.Shooter.LauncherVoltageComp;
 
 /*
  * Autonomous for the goBILDA StarterBot with MECANUM wheels (BIOBUZZ 2026-2027).
@@ -65,7 +66,7 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
      * Launcher speeds in encoder ticks per second (same units as the teleop).
      * 1650 ticks/s is about 3540 RPM. Tuned with FlywheelPIDFTuner.
      */
-    public final int LAUNCHER_TARGET_VELOCITY = 1650;
+    public final int LAUNCHER_TARGET_VELOCITY = 1620;
     public final int LAUNCHER_MIN_VELOCITY = 1600;
 
     /*
@@ -115,6 +116,7 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
     private DcMotor leftBackDrive = null;
     private DcMotor rightBackDrive = null;
     private DcMotorEx launcher = null;
+    private LauncherVoltageComp launcherVoltage;
     private DcMotor intake = null;
     private DcMotor transfer = null;
 
@@ -169,7 +171,8 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
         transfer.setZeroPowerBehavior(BRAKE);
 
         launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 14.4));
+        // Launcher PIDF (40, 0, 0, 14.4) with battery voltage compensation on F.
+        launcherVoltage = new LauncherVoltageComp(hardwareMap, launcher);
 
 
         poseTracker = new AutoPoseTracker(hardwareMap);
@@ -192,6 +195,7 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
 
     @Override
     public void loop() {
+        launcherVoltage.update();
         poseTracker.update();
         intakePower = 0;
 

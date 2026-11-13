@@ -24,6 +24,7 @@ import org.firstinspires.ftc.teamcode.Java.Shooter.FlywheelSpeedModel;
 import org.firstinspires.ftc.teamcode.Java.Teleop.BasicTeleopLM1;
 import org.firstinspires.ftc.teamcode.Java.Teleop.LimelightPositionLM1;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
+import org.firstinspires.ftc.teamcode.Java.Shooter.LauncherVoltageComp;
 
 /*
  * Far-wall "wait for the tip" auto. RedFarWallAutoLM1 / BlueFarWallAutoLM1 only pick the alliance.
@@ -82,6 +83,8 @@ public abstract class FarWallTagAutoLM1 extends OpMode {
     // ---------- Shooter ----------
     // 0 = pick the speed from the distance to the cell (FlywheelSpeedModel). Otherwise a fixed speed.
     public static double SHOT_VELOCITY_OVERRIDE = 0;
+    // Added to the distance-based speed (all autos shoot 30 ticks/s slower).
+    public static double MODEL_SPEED_TRIM = -30;
     public static double LAUNCHER_TOLERANCE = 50;
     public static double INTAKE_FIRE_POWER = 1;
     public static double TRANSFER_FEED_POWER = 1;
@@ -100,6 +103,7 @@ public abstract class FarWallTagAutoLM1 extends OpMode {
     private Follower follower;
     private Limelight3A limelight;
     private DcMotorEx launcher;
+    private LauncherVoltageComp launcherVoltage;
     private DcMotor intake;
     private DcMotor transfer;
     private Servo flowerServo;
@@ -139,7 +143,8 @@ public abstract class FarWallTagAutoLM1 extends OpMode {
         launcher = hardwareMap.get(DcMotorEx.class, "launcher");
         launcher.setDirection(DcMotorSimple.Direction.REVERSE);
         launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 14.4));
+        // Launcher PIDF (40, 0, 0, 14.4) with battery voltage compensation on F.
+        launcherVoltage = new LauncherVoltageComp(hardwareMap, launcher);
         intake = hardwareMap.get(DcMotor.class, "intake");
         intake.setZeroPowerBehavior(BRAKE);
         transfer = hardwareMap.get(DcMotor.class, "transfer");
@@ -156,7 +161,7 @@ public abstract class FarWallTagAutoLM1 extends OpMode {
         startPose = new Pose(cell.x(), wallSpot.y(), wallSpot.heading());
         shotVelocity = SHOT_VELOCITY_OVERRIDE > 0
                 ? SHOT_VELOCITY_OVERRIDE
-                : FlywheelSpeedModel.velocityForDistance(startPose.distance(cell));
+                : FlywheelSpeedModel.velocityForDistance(startPose.distance(cell)) + MODEL_SPEED_TRIM;
 
         parkLegs = new Pose[]{toAlliance(new Pose(PARK[0], PARK[1], Math.toRadians(START_HEADING_DEG)))};
         follower.setPose(startPose);
@@ -259,6 +264,7 @@ public abstract class FarWallTagAutoLM1 extends OpMode {
 
         // Flywheel spins the whole auto until parking, so it's ready the moment the tags appear.
         double flywheel = (state == State.WAIT_FOR_TAGS || state == State.SHOOT) ? shotVelocity : 0;
+        launcherVoltage.update();
         launcher.setVelocity(fireFeedforward.command((int) Math.round(flywheel), launcher.getVelocity(), firing));
         intake.setPower(intakePower);
         transfer.setPower(transferPower);

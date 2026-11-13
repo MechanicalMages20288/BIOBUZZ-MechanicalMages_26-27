@@ -38,6 +38,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
 import org.firstinspires.ftc.teamcode.Java.Shooter.FireFeedforward;
 import org.firstinspires.ftc.teamcode.Java.Shooter.FlywheelSpeedModel;
+import org.firstinspires.ftc.teamcode.Java.Shooter.LauncherVoltageComp;
 
 /*
  * This file includes a teleop (driver-controlled) file for the goBILDA® StarterBot with Mecanum
@@ -68,6 +69,7 @@ public class BasicTeleopLM1 extends OpMode {
     private DcMotor rightFrontDrive = null;
     private DcMotor rightBackDrive = null;
     private DcMotorEx launcher = null;
+    private LauncherVoltageComp launcherVoltage;
     private DcMotor intake = null;
     private DcMotor transfer = null;
     private Servo flowerServo = null;
@@ -157,7 +159,7 @@ public class BasicTeleopLM1 extends OpMode {
      */
     public static String FLOWER_SERVO_NAME = "servo";
     public static double FLOWER_UP_POSITION = 0.31;
-    public static double FLOWER_DOWN_POSITION = 0.86;
+    public static double FLOWER_DOWN_POSITION = 0.96;
     boolean flowerDown = false;
     boolean xWasDown = false;
 
@@ -236,7 +238,8 @@ public class BasicTeleopLM1 extends OpMode {
 
         launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
-        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 14.4)); // same as the autos
+        // Launcher PIDF (40, 0, 0, 14.4) with battery voltage compensation on F.
+        launcherVoltage = new LauncherVoltageComp(hardwareMap, launcher);
 
         /*
          * Pinpoint odometry computer. The name must match the robot configuration.
@@ -346,6 +349,7 @@ public class BasicTeleopLM1 extends OpMode {
         telemetry.addData("Shooter", launcherAtSpeed ? "READY TO FIRE" : "NOT READY");
         telemetry.addData("Target velocity", "%d ticks/s", flywheelTarget());
         telemetry.addData("Actual velocity", "%.0f ticks/s", launcher.getVelocity());
+        telemetry.addData("Battery", "%.2f V  (launcher F %.2f)", launcherVoltage.voltage(), launcherVoltage.f());
         telemetry.addData("Fire boost", fireFeedforward.boosting()
                         ? String.format("ON +%.0f ticks/s", fireFeedforward.boost()) : "off");
         if (!Double.isNaN(fireFeedforward.lowestLastBurst())) {
@@ -451,6 +455,7 @@ public class BasicTeleopLM1 extends OpMode {
          * Keep the launcher spinning at the target velocity the whole time teleop is running.
          * While firing, FireFeedforward raises it after the first ball so balls 2-4 don't go short.
          */
+        launcherVoltage.update();
         launcher.setVelocity(fireFeedforward.command(flywheelTarget(), actual, firing));
 
         // Check whether the launcher is at its target velocity (shown on telemetry as ready/not ready).

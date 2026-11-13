@@ -22,6 +22,7 @@ import org.firstinspires.ftc.teamcode.Java.Shooter.FireFeedforward;
 import org.firstinspires.ftc.teamcode.Java.Shooter.FlywheelSpeedModel;
 import org.firstinspires.ftc.teamcode.Java.Teleop.BasicTeleopLM1;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
+import org.firstinspires.ftc.teamcode.Java.Shooter.LauncherVoltageComp;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -96,6 +97,18 @@ public abstract class PedroAutoLM1 extends OpMode {
     // Normal-speed drive in stops here (1 in short of the old 130.731)...
     public static double[] FLOWER_INTAKE = {46.5873, 129.731, 90};
     // ...then a slow push the rest of the way into the flower.
+    /*
+     * Alliance (side-wall) flower, used by the 2x Flower autos INSTEAD of the corner wall
+     * intake. The red alliance flower is on the red wall (x = 0) at about y = 46. Same spacing
+     * from the wall as the top flower: approach 31.62 in off the wall, normal-speed drive in to
+     * 11.77 in, then the same slow push / wait / back-out / lift.
+     */
+    // y 48: 2 in toward the far side from the original 46.
+    public static double[] SIDE_FLOWER_APPROACH = {31.62, 48, 180};
+    public static double[] SIDE_FLOWER_INTAKE = {11.77, 48, 180};
+    // Side flower backs out 2 in more than the top flower before lifting the servo.
+    public static double SIDE_FLOWER_BACK_UP_IN = 8;
+
     public static double FLOWER_SLOW_PUSH_IN = 2;        // inches
     public static double FLOWER_SLOW_POWER = 0.3;        // drive power (0-1)
     public static double FLOWER_SLOW_TIMEOUT = 1.5;      // give up if the flower stops it
@@ -132,10 +145,11 @@ public abstract class PedroAutoLM1 extends OpMode {
     public static double AIM_TOLERANCE_DEG = 3;
     public static double LAUNCHER_TOLERANCE = 50;
     // Fixed shot speed (ticks/s), same launcher PIDF (F = 14.4) and fire feedforward as the teleop.
-    public static double SHOT_VELOCITY = 1580;
+    public static double SHOT_VELOCITY = 1550;
 
     private Follower follower;
     private DcMotorEx launcher;
+    private LauncherVoltageComp launcherVoltage;
     private DcMotor intake;
     private DcMotor transfer;
     private Servo flowerServo;
@@ -167,7 +181,8 @@ public abstract class PedroAutoLM1 extends OpMode {
         launcher = hardwareMap.get(DcMotorEx.class, "launcher");
         launcher.setDirection(DcMotorSimple.Direction.REVERSE);
         launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 14.4));
+        // Launcher PIDF (40, 0, 0, 14.4) with battery voltage compensation on F.
+        launcherVoltage = new LauncherVoltageComp(hardwareMap, launcher);
 
         intake = hardwareMap.get(DcMotor.class, "intake");
         intake.setZeroPowerBehavior(BRAKE);
@@ -222,6 +237,7 @@ public abstract class PedroAutoLM1 extends OpMode {
         }
 
         FireFeedforward ff = stepIndex == 0 ? firstShotFeedforward : fireFeedforward;
+        launcherVoltage.update();
         launcher.setVelocity(ff.command((int) Math.round(flywheelTarget), launcher.getVelocity(), firing));
         intake.setPower(intakePower);
         transfer.setPower(transferPower);
@@ -234,6 +250,7 @@ public abstract class PedroAutoLM1 extends OpMode {
         telemetry.addData("Time", "%.1f s", autoTimer.seconds());
         telemetry.addData("Pose", "x %.1f, y %.1f, heading %.0f deg", p.x(), p.y(), Math.toDegrees(p.heading()));
         telemetry.addData("Flywheel", "target %.0f, actual %.0f ticks/s", flywheelTarget, launcher.getVelocity());
+        telemetry.addData("Battery", "%.2f V  (launcher F %.2f)", launcherVoltage.voltage(), launcherVoltage.f());
         telemetry.update();
     }
 
@@ -248,18 +265,30 @@ public abstract class PedroAutoLM1 extends OpMode {
 
     // ---------- Route ----------
 
+    /*
+     * false (RedAutoLM1 / BlueAutoLM1): corner wall intake after the first shot.
+     * true (Red/BlueLM12xFlowerAuto): the alliance side flower instead of the wall intake.
+     */
+    protected boolean sideFlowerInsteadOfWall() {
+        return false;
+    }
+
     private void buildRoute() {
         Pose cell = cell(SHOT_AUDIENCE_CELL);
 
         steps.add(new Shoot("Shoot preloads from start", cell));
-        steps.add(new Drive("Drive to garden", pose(GARDEN_APPROACH), null, false, null).passThrough());
-        for (int i = 1; i <= INTAKE_PASSES; i++) {
-            if (i > 1) {
-                steps.add(new Drive("Back out " + (i - 1), pose(GARDEN_BACK_OUT), null, true, null, PUSH_TIMEOUT));
+        if (sideFlowerInsteadOfWall()) {
+            addFlowerIntake("side flower", SIDE_FLOWER_APPROACH, SIDE_FLOWER_INTAKE, SIDE_FLOWER_BACK_UP_IN);
+        } else {
+            steps.add(new Drive("Drive to garden", pose(GARDEN_APPROACH), null, false, null).passThrough());
+            for (int i = 1; i <= INTAKE_PASSES; i++) {
+                if (i > 1) {
+                    steps.add(new Drive("Back out " + (i - 1), pose(GARDEN_BACK_OUT), null, true, null, PUSH_TIMEOUT));
+                }
+                steps.add(new Drive("Push into corner " + i, pose(GARDEN_INTAKE), null, true, null, PUSH_TIMEOUT));
             }
-            steps.add(new Drive("Push into corner " + i, pose(GARDEN_INTAKE), null, true, null, PUSH_TIMEOUT));
+            steps.add(new Wait("Intake corner (wait)", GARDEN_INTAKE_SECONDS, true));
         }
-        steps.add(new Wait("Intake corner (wait)", GARDEN_INTAKE_SECONDS, true));
 
         Pose finalCell = cell(FINAL_SHOT_AUDIENCE_CELL);
         steps.add(new Drive("Path 3 (back up the side)", pose(POINT_3), null, false, null).passThrough());
@@ -268,20 +297,33 @@ public abstract class PedroAutoLM1 extends OpMode {
         // Shoot turns in place so the back points straight at the cell, then fires.
         steps.add(new Shoot("Final shot", finalCell, SHOT_2_MIN_SPIN_UP_SECONDS));
 
-        // Flower intake, then back to the same shot spot.
-        double[] flowerBack = {FLOWER_INTAKE[0], FLOWER_INTAKE[1] + FLOWER_SLOW_PUSH_IN - FLOWER_BACK_UP_IN, FLOWER_INTAKE[2]};
-        steps.add(new Drive("Drive to flower", pose(FLOWER_APPROACH), null, false, null));
-        steps.add(new FlowerServo("Lower flower intake", BasicTeleopLM1.FLOWER_DOWN_POSITION, FLOWER_LOWER_SECONDS));
-        steps.add(new Drive("Intake flower (forward)", pose(FLOWER_INTAKE), null, true, null));
-        steps.add(new SlowPush("Slow push into flower", FLOWER_SLOW_PUSH_IN, FLOWER_SLOW_POWER, FLOWER_SLOW_TIMEOUT));
-        steps.add(new Wait("Intake flower (wait)", FLOWER_INTAKE_WAIT_SECONDS, true));
-        steps.add(new Drive("Back up " + FLOWER_BACK_UP_IN + " in", pose(flowerBack), null, true, null));
-        steps.add(new FlowerServo("Raise flower intake", BasicTeleopLM1.FLOWER_UP_POSITION, FLOWER_SERVO_SECONDS));
+        // Top flower intake, then back to the same shot spot.
+        addFlowerIntake("top flower", FLOWER_APPROACH, FLOWER_INTAKE, FLOWER_BACK_UP_IN);
         steps.add(new Drive("Back to shot spot", pose(FINAL_SHOT), null, false, null));
         steps.add(new Shoot("Flower shot", finalCell));
 
         // Park: straight into the park zone, keeping the same heading so there's no turn.
         steps.add(new Drive("Park", pose(PARK), null, false, null));
+    }
+
+    /*
+     * Flower intake (same for every flower): drive to the approach, lower the flower servo and
+     * wait for it to tip, drive in at normal speed, slow push FLOWER_SLOW_PUSH_IN, wait while
+     * intaking, back out FLOWER_BACK_UP_IN (straight back along the heading), then lift.
+     * approach / intake are red-side {x, y, heading deg}; the intake heading faces the flower.
+     */
+    private void addFlowerIntake(String label, double[] approach, double[] intake, double backUpIn) {
+        double h = Math.toRadians(intake[2]);
+        double back = FLOWER_SLOW_PUSH_IN - backUpIn; // net move along the heading
+        double[] backPoint = {intake[0] + back * Math.cos(h), intake[1] + back * Math.sin(h), intake[2]};
+
+        steps.add(new Drive("Drive to " + label, pose(approach), null, false, null));
+        steps.add(new FlowerServo("Lower flower intake", BasicTeleopLM1.FLOWER_DOWN_POSITION, FLOWER_LOWER_SECONDS));
+        steps.add(new Drive("Intake " + label + " (forward)", pose(intake), null, true, null));
+        steps.add(new SlowPush("Slow push into " + label, FLOWER_SLOW_PUSH_IN, FLOWER_SLOW_POWER, FLOWER_SLOW_TIMEOUT));
+        steps.add(new Wait("Intake " + label + " (wait)", FLOWER_INTAKE_WAIT_SECONDS, true));
+        steps.add(new Drive("Back up " + backUpIn + " in", pose(backPoint), null, true, null));
+        steps.add(new FlowerServo("Raise flower intake", BasicTeleopLM1.FLOWER_UP_POSITION, FLOWER_SERVO_SECONDS));
     }
 
     // ---------- Steps ----------

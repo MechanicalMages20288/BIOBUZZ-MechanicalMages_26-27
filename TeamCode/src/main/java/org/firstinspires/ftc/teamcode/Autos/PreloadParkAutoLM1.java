@@ -20,6 +20,7 @@ import org.firstinspires.ftc.teamcode.Java.Field.PoseStorage;
 import org.firstinspires.ftc.teamcode.Java.Shooter.FireFeedforward;
 import org.firstinspires.ftc.teamcode.Java.Teleop.BasicTeleopLM1;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
+import org.firstinspires.ftc.teamcode.Java.Shooter.LauncherVoltageComp;
 
 /*
  * Preload-only auto: shoot the 4 preloads from the start spot, then park in the loading zone.
@@ -70,6 +71,7 @@ public abstract class PreloadParkAutoLM1 extends OpMode {
 
     private Follower follower;
     private DcMotorEx launcher;
+    private LauncherVoltageComp launcherVoltage;
     private DcMotor intake;
     private DcMotor transfer;
     private Servo flowerServo;
@@ -98,7 +100,8 @@ public abstract class PreloadParkAutoLM1 extends OpMode {
         launcher = hardwareMap.get(DcMotorEx.class, "launcher");
         launcher.setDirection(DcMotorSimple.Direction.REVERSE);
         launcher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(40, 0, 0, 14.4));
+        // Launcher PIDF (40, 0, 0, 14.4) with battery voltage compensation on F.
+        launcherVoltage = new LauncherVoltageComp(hardwareMap, launcher);
         intake = hardwareMap.get(DcMotor.class, "intake");
         intake.setZeroPowerBehavior(BRAKE);
         transfer = hardwareMap.get(DcMotor.class, "transfer");
@@ -207,6 +210,7 @@ public abstract class PreloadParkAutoLM1 extends OpMode {
         }
 
         double flywheel = state == State.SHOOT ? PedroAutoLM1.SHOT_VELOCITY : 0;
+        launcherVoltage.update();
         launcher.setVelocity(fireFeedforward.command((int) Math.round(flywheel), launcher.getVelocity(), firing));
         intake.setPower(intakePower);
         transfer.setPower(transferPower);
