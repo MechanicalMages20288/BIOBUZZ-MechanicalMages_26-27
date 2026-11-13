@@ -76,7 +76,7 @@ public abstract class PedroAutoLM1 extends OpMode {
     // Back out to here between pushes, then push in again.
     public static double[] GARDEN_BACK_OUT = {10, 20, -90};
     public static int INTAKE_PASSES = 2;          // total pushes into the corner (1 + 2 more)
-    public static double PUSH_TIMEOUT = 1;     // seconds per push / back-out
+    public static double PUSH_TIMEOUT = 0.85;     // seconds per push / back-out
 
     // Path 3: back out of the garden up the red side, shooter (back) first.
     public static double[] POINT_3 = {26.1485, 63.593, -102.4396};
@@ -93,9 +93,14 @@ public abstract class PedroAutoLM1 extends OpMode {
     // Flower (top wall), from the team's visualizer file. Front (intake) toward the flower.
     public static double[] FLOWER_APPROACH = {46.5874, 109.8841, 90};
     // 9.5 in further into the flower than the visualizer point (y 121.231).
-    public static double[] FLOWER_INTAKE = {46.5873, 130.731, 90};
-    public static double FLOWER_INTAKE_WAIT_SECONDS = 1.5; // stay at the flower, intaking
-    public static double FLOWER_BACK_UP_IN = 4;        // back up this far before raising the servo
+    // Normal-speed drive in stops here (1 in short of the old 130.731)...
+    public static double[] FLOWER_INTAKE = {46.5873, 129.731, 90};
+    // ...then a slow push the rest of the way into the flower.
+    public static double FLOWER_SLOW_PUSH_IN = 2;        // inches
+    public static double FLOWER_SLOW_POWER = 0.3;        // drive power (0-1)
+    public static double FLOWER_SLOW_TIMEOUT = 1.5;      // give up if the flower stops it
+    public static double FLOWER_INTAKE_WAIT_SECONDS = 1.75; // stay at the flower, intaking
+    public static double FLOWER_BACK_UP_IN = 3;        // back up this far before raising the servo
     public static double FLOWER_SERVO_SECONDS = 0.2;   // time for the servo to move (raising)
     public static double FLOWER_LOWER_SECONDS = 1.0;   // after lowering: wait for the attachment to tip
 
@@ -109,9 +114,11 @@ public abstract class PedroAutoLM1 extends OpMode {
 
     // ---------- Timing ----------
     public static double FEED_SECONDS = 3;          // how long to run intake + transfer per volley
-    public static double MIN_SPIN_UP_SECONDS = 2.0;   // always wait at least this long before feeding
+    public static double MIN_SPIN_UP_SECONDS = 2.0;
+    // Shot 2 (first far-side shot): flywheel has been spinning the whole drive, so 1 s less.
+    public static double SHOT_2_MIN_SPIN_UP_SECONDS = 1.0;   // always wait at least this long before feeding
     public static double SHOOT_READY_TIMEOUT = 4.0;   // feed anyway if not aimed/at speed by then
-    public static double GARDEN_INTAKE_SECONDS = 0.5; // extra intake time after the last push
+    public static double GARDEN_INTAKE_SECONDS = 0.0; // extra intake time after the last push
     public static double DRIVE_TIMEOUT = 4.0;         // give up on a drive after this long
     public static double AT_END_INCHES = 2.0;         // a drive is done this close to its end
 
@@ -251,13 +258,14 @@ public abstract class PedroAutoLM1 extends OpMode {
         steps.add(new Drive("Path 4 (up the side)", pose(POINT_4), null, true, null));
         steps.add(new Drive("Path 5 (to final shot)", pose(FINAL_SHOT), point(PATH_5_BEND), true, null));
         // Shoot turns in place so the back points straight at the cell, then fires.
-        steps.add(new Shoot("Final shot", finalCell));
+        steps.add(new Shoot("Final shot", finalCell, SHOT_2_MIN_SPIN_UP_SECONDS));
 
         // Flower intake, then back to the same shot spot.
-        double[] flowerBack = {FLOWER_INTAKE[0], FLOWER_INTAKE[1] - FLOWER_BACK_UP_IN, FLOWER_INTAKE[2]};
+        double[] flowerBack = {FLOWER_INTAKE[0], FLOWER_INTAKE[1] + FLOWER_SLOW_PUSH_IN - FLOWER_BACK_UP_IN, FLOWER_INTAKE[2]};
         steps.add(new Drive("Drive to flower", pose(FLOWER_APPROACH), null, true, null));
         steps.add(new FlowerServo("Lower flower intake", BasicTeleopLM1.FLOWER_DOWN_POSITION, FLOWER_LOWER_SECONDS));
         steps.add(new Drive("Intake flower (forward)", pose(FLOWER_INTAKE), null, true, null));
+        steps.add(new SlowPush("Slow push into flower", FLOWER_SLOW_PUSH_IN, FLOWER_SLOW_POWER, FLOWER_SLOW_TIMEOUT));
         steps.add(new Wait("Intake flower (wait)", FLOWER_INTAKE_WAIT_SECONDS, true));
         steps.add(new Drive("Back up " + FLOWER_BACK_UP_IN + " in", pose(flowerBack), null, true, null));
         steps.add(new FlowerServo("Raise flower intake", BasicTeleopLM1.FLOWER_UP_POSITION, FLOWER_SERVO_SECONDS));
@@ -361,8 +369,15 @@ public abstract class PedroAutoLM1 extends OpMode {
         double aimHeading;
         boolean feeding;
 
+        final double minSpinUp;
+
         Shoot(String name, Pose cell) {
+            this(name, cell, MIN_SPIN_UP_SECONDS);
+        }
+
+        Shoot(String name, Pose cell, double minSpinUp) {
             super(name);
+            this.minSpinUp = minSpinUp;
             this.cell = cell;
         }
 
@@ -382,7 +397,7 @@ public abstract class PedroAutoLM1 extends OpMode {
             if (!feeding) {
                 boolean aimed = Math.abs(Math.toDegrees(wrap(aimHeading - follower.pose().heading()))) <= AIM_TOLERANCE_DEG;
                 boolean atSpeed = Math.abs(launcher.getVelocity() - flywheelTarget) <= LAUNCHER_TOLERANCE;
-                boolean spunUp = readyTimer.seconds() > MIN_SPIN_UP_SECONDS;
+                boolean spunUp = readyTimer.seconds() > minSpinUp;
                 if ((aimed && atSpeed && spunUp) || readyTimer.seconds() > SHOOT_READY_TIMEOUT) {
                     feeding = true;
                     feedTimer.reset();
@@ -393,6 +408,41 @@ public abstract class PedroAutoLM1 extends OpMode {
             intakePower = INTAKE_FIRE_POWER;
             firing = true;
             return feedTimer.seconds() > FEED_SECONDS;
+        }
+    }
+
+    /*
+     * Slow straight push forward (intake first) at a fixed low power, intake on, until the robot
+     * has moved `inches` or `timeout` runs out. Then it holds where it stopped.
+     */
+    private class SlowPush extends Step {
+        final double inches, power, timeout;
+        final ElapsedTime timer = new ElapsedTime();
+        Pose startPose;
+
+        SlowPush(String name, double inches, double power, double timeout) {
+            super(name);
+            this.inches = inches;
+            this.power = power;
+            this.timeout = timeout;
+        }
+
+        @Override
+        void begin() {
+            startPose = follower.pose();
+            follower.manual(power, 0, 0);
+            timer.reset();
+        }
+
+        @Override
+        boolean run() {
+            intakePower = INTAKE_POWER;
+            follower.manual(power, 0, 0);
+            if (follower.pose().distance(startPose) >= inches || timer.seconds() > timeout) {
+                follower.hold(follower.pose());
+                return true;
+            }
+            return false;
         }
     }
 
