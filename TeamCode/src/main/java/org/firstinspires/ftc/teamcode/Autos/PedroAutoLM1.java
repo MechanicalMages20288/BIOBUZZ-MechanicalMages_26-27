@@ -8,6 +8,9 @@ import com.pedropathing.follower.Follower;
 import com.pedropathing.math.Pose;
 import com.pedropathing.paths.Path;
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
+import com.qualcomm.hardware.limelightvision.LLResult;
+import com.qualcomm.hardware.limelightvision.LLResultTypes;
+import com.qualcomm.hardware.limelightvision.Limelight3A;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
@@ -21,6 +24,7 @@ import org.firstinspires.ftc.teamcode.Java.Field.PoseStorage;
 import org.firstinspires.ftc.teamcode.Java.Shooter.FireFeedforward;
 import org.firstinspires.ftc.teamcode.Java.Shooter.FlywheelSpeedModel;
 import org.firstinspires.ftc.teamcode.Java.Teleop.BasicTeleopLM1;
+import org.firstinspires.ftc.teamcode.Java.Teleop.LimelightPositionLM1;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
 import org.firstinspires.ftc.teamcode.Java.Shooter.LauncherVoltageComp;
 
@@ -44,6 +48,18 @@ import java.util.List;
  *      FLOWER_INTAKE while intaking, back up FLOWER_BACK_UP_IN, raise the flower servo,
  *      return to the final shot spot and shoot again.
  *   7. Park: drive straight into the park zone at PARK.
+ *
+ * TAG CHECK AFTER THE PRELOADS (only the Tag autos: Red/BlueTagAutoLM1 and
+ * Red/BlueTag2xFlowerAutoLM1; useTagCheck() = true): right after the first shot, the robot stays aimed and the
+ * Limelight watches the tags of the cell it just shot into (red audience-side cell 34-37,
+ * blue far-side cell 42-45). The camera faces backward, the same way as the shooter.
+ *   - Tag gone (not seen for TAG_LOST_GRACE_SECONDS): leave right away on the route above.
+ *   - Tag still visible for the whole TAG_WATCH_SECONDS (3 s): that cell is still facing us,
+ *     so the route changes to: intake (step 3) -> back to START -> shoot that cell again ->
+ *     up the red side to the top flower -> final shot spot, shoot the far-side cell -> park.
+ *     Before the second start shot and before the top flower trip it checks the clock; if
+ *     there isn't enough time left (RETURN_SHOT_SECONDS_NEEDED / FLOWER_TRIP_SECONDS_NEEDED)
+ *     it skips straight to parking.
  *
  * Positions are in the FieldLM1 frame (inches): x from the red wall (0) to the blue wall (144),
  * y from the audience side (0) to the far side (144), heading 0 = toward the blue wall, CCW
@@ -135,6 +151,22 @@ public abstract class PedroAutoLM1 extends OpMode {
     public static double DRIVE_TIMEOUT = 4.0;         // give up on a drive after this long
     public static double AT_END_INCHES = 2.0;         // a drive is done this close to its end
 
+    // ---------- Tag check after the preloads ----------
+    // Tags of the cell the preloads go into (game manual 9.9).
+    public static int RED_PRELOAD_CELL_FIRST_TAG = 34, RED_PRELOAD_CELL_LAST_TAG = 37; // red audience-side
+    public static int BLUE_PRELOAD_CELL_FIRST_TAG = 42, BLUE_PRELOAD_CELL_LAST_TAG = 45; // blue far-side
+    // The tag must stay visible this long to take the "shoot that cell again" route...
+    public static double TAG_WATCH_SECONDS = 3.0;
+    // ...and counts as gone once it hasn't been seen for this long (rides out dropped frames).
+    public static double TAG_LOST_GRACE_SECONDS = 0.3;
+    public static double TAG_MAX_STALENESS_MS = 200;  // ignore older Limelight frames
+
+    // Time checks in the "shoot again" route (seconds that must be LEFT in the 30 s auto,
+    // including time to park afterward). Not enough -> skip straight to parking.
+    public static double AUTO_SECONDS = 30;
+    public static double RETURN_SHOT_SECONDS_NEEDED = 13;  // drive back to start + shoot + park
+    public static double FLOWER_TRIP_SECONDS_NEEDED = 18;  // up the side + top flower + far shot + park
+
     // ---------- Shooter / intake (same as the teleop) ----------
     public static double INTAKE_POWER = 1;
     public static double TRANSFER_FEED_POWER = 1;
@@ -148,6 +180,8 @@ public abstract class PedroAutoLM1 extends OpMode {
     public static double SHOT_VELOCITY = 1550;
 
     private Follower follower;
+    private Limelight3A limelight;
+    private String routeNote = "watching preload cell tags";
     private DcMotorEx launcher;
     private LauncherVoltageComp launcherVoltage;
     private DcMotor intake;
@@ -177,6 +211,18 @@ public abstract class PedroAutoLM1 extends OpMode {
         // Recalibrate the Pinpoint's gyro while the robot sits still at INIT (prevents heading
         // drift). KEEP THE ROBOT STILL during INIT. The start position is set again at START.
         hardwareMap.get(GoBildaPinpointDriver.class, Constants.localizerConfig.name.get()).recalibrateIMU();
+
+        // Limelight for the tag check after the preloads (same pipeline as the teleops).
+        // Only the Tag autos use it; the others don't touch the Limelight at all.
+        if (useTagCheck()) {
+            limelight = hardwareMap.get(Limelight3A.class, LimelightPositionLM1.LIMELIGHT_NAME);
+            if (LimelightPositionLM1.UPLOAD_PIPELINE_AT_INIT) {
+                limelight.uploadPipeline(LimelightPositionLM1.PIPELINE_JSON, LimelightPositionLM1.APRILTAG_PIPELINE);
+            }
+            limelight.pipelineSwitch(LimelightPositionLM1.APRILTAG_PIPELINE);
+            limelight.setPollRateHz(100);
+            limelight.start();
+        }
 
         launcher = hardwareMap.get(DcMotorEx.class, "launcher");
         launcher.setDirection(DcMotorSimple.Direction.REVERSE);
@@ -248,6 +294,7 @@ public abstract class PedroAutoLM1 extends OpMode {
 
         telemetry.addData("Step", "%d/%d  %s", Math.min(stepIndex + 1, steps.size()), steps.size(), stepName);
         telemetry.addData("Time", "%.1f s", autoTimer.seconds());
+        telemetry.addData("Route", routeNote);
         telemetry.addData("Pose", "x %.1f, y %.1f, heading %.0f deg", p.x(), p.y(), Math.toDegrees(p.heading()));
         telemetry.addData("Flywheel", "target %.0f, actual %.0f ticks/s", flywheelTarget, launcher.getVelocity());
         telemetry.addData("Battery", "%.2f V  (launcher F %.2f)", launcherVoltage.voltage(), launcherVoltage.f());
@@ -258,6 +305,9 @@ public abstract class PedroAutoLM1 extends OpMode {
     public void stop() {
         PoseStorage.save(follower.pose(), alliance());
         follower.stop();
+        if (limelight != null) {
+            limelight.stop();
+        }
         launcher.setVelocity(0);
         intake.setPower(0);
         transfer.setPower(0);
@@ -273,22 +323,31 @@ public abstract class PedroAutoLM1 extends OpMode {
         return false;
     }
 
+    /*
+     * Only the preload shot and the tag check are added up front. The tag check then adds the
+     * rest of the route: addNormalRoute() (tag gone) or addShootAgainRoute() (tag still there).
+     */
     private void buildRoute() {
-        Pose cell = cell(SHOT_AUDIENCE_CELL);
-
-        steps.add(new Shoot("Shoot preloads from start", cell));
-        if (sideFlowerInsteadOfWall()) {
-            addFlowerIntake("side flower", SIDE_FLOWER_APPROACH, SIDE_FLOWER_INTAKE, SIDE_FLOWER_BACK_UP_IN);
+        steps.add(new Shoot("Shoot preloads from start", cell(SHOT_AUDIENCE_CELL)));
+        if (useTagCheck()) {
+            steps.add(new CheckPreloadCellTags("Watch preload cell tags"));
         } else {
-            steps.add(new Drive("Drive to garden", pose(GARDEN_APPROACH), null, false, null).passThrough());
-            for (int i = 1; i <= INTAKE_PASSES; i++) {
-                if (i > 1) {
-                    steps.add(new Drive("Back out " + (i - 1), pose(GARDEN_BACK_OUT), null, true, null, PUSH_TIMEOUT));
-                }
-                steps.add(new Drive("Push into corner " + i, pose(GARDEN_INTAKE), null, true, null, PUSH_TIMEOUT));
-            }
-            steps.add(new Wait("Intake corner (wait)", GARDEN_INTAKE_SECONDS, true));
+            routeNote = "normal route (no tag check)";
+            addNormalRoute();
         }
+    }
+
+    /*
+     * false (RedAutoLM1, BlueAutoLM1, Red/BlueLM12xFlowerAuto): the original route, no tag check.
+     * true (the Tag autos): watch the preload cell's tags after the first shot and pick the route.
+     */
+    protected boolean useTagCheck() {
+        return false;
+    }
+
+    // Tag gone: the original route. Intake, up the side to the final shot, top flower, shoot, park.
+    private void addNormalRoute() {
+        addFirstIntake();
 
         Pose finalCell = cell(FINAL_SHOT_AUDIENCE_CELL);
         steps.add(new Drive("Path 3 (back up the side)", pose(POINT_3), null, false, null).passThrough());
@@ -304,6 +363,65 @@ public abstract class PedroAutoLM1 extends OpMode {
 
         // Park: straight into the park zone, keeping the same heading so there's no turn.
         steps.add(new Drive("Park", pose(PARK), null, false, null));
+    }
+
+    /*
+     * Tag still visible: intake, back to START and shoot the same cell again, then up the side
+     * to the top flower and shoot the far-side cell from the final shot spot, then park.
+     * Each big chunk first checks there's enough time left; if not, it parks instead.
+     */
+    private void addShootAgainRoute() {
+        addFirstIntake();
+        steps.add(new Decide("Time check: shoot again from start?", () -> {
+            if (timeLeft() < RETURN_SHOT_SECONDS_NEEDED) {
+                routeNote += String.format(" | %.0f s left: skipped 2nd start shot, parking", timeLeft());
+                addParkFromNearSide();
+                return;
+            }
+            steps.add(new Drive("Back to start", pose(START), null, false, null));
+            steps.add(new Shoot("Shoot same cell again", cell(SHOT_AUDIENCE_CELL), SHOT_2_MIN_SPIN_UP_SECONDS));
+            steps.add(new Decide("Time check: top flower + far shot?", () -> {
+                if (timeLeft() < FLOWER_TRIP_SECONDS_NEEDED) {
+                    routeNote += String.format(" | %.0f s left: skipped top flower, parking", timeLeft());
+                    addParkFromNearSide();
+                    return;
+                }
+                Pose finalCell = cell(FINAL_SHOT_AUDIENCE_CELL);
+                steps.add(new Drive("Path 3 (up the side)", pose(POINT_3), null, false, null).passThrough());
+                steps.add(new Drive("Path 4 (up the side)", pose(POINT_4), null, false, null));
+                addFlowerIntake("top flower", FLOWER_APPROACH, FLOWER_INTAKE, FLOWER_BACK_UP_IN);
+                steps.add(new Drive("To final shot spot", pose(FINAL_SHOT), null, false, null));
+                steps.add(new Shoot("Far cell shot", finalCell));
+                steps.add(new Drive("Park", pose(PARK), null, false, null));
+            }));
+        }));
+    }
+
+    // Park from the audience half: up the red side (shooter first, no turning), then into PARK.
+    private void addParkFromNearSide() {
+        steps.add(new Drive("Park: up the side", pose(POINT_3), null, false, null).passThrough());
+        steps.add(new Drive("Park: up the side", pose(POINT_4), null, false, null));
+        steps.add(new Drive("Park", pose(new double[]{PARK[0], PARK[1], POINT_4[2]}), null, false, null));
+    }
+
+    private double timeLeft() {
+        return AUTO_SECONDS - autoTimer.seconds();
+    }
+
+    // The first intake after the preloads: corner wall intake, or the side flower (2x Flower autos).
+    private void addFirstIntake() {
+        if (sideFlowerInsteadOfWall()) {
+            addFlowerIntake("side flower", SIDE_FLOWER_APPROACH, SIDE_FLOWER_INTAKE, SIDE_FLOWER_BACK_UP_IN);
+        } else {
+            steps.add(new Drive("Drive to garden", pose(GARDEN_APPROACH), null, false, null).passThrough());
+            for (int i = 1; i <= INTAKE_PASSES; i++) {
+                if (i > 1) {
+                    steps.add(new Drive("Back out " + (i - 1), pose(GARDEN_BACK_OUT), null, true, null, PUSH_TIMEOUT));
+                }
+                steps.add(new Drive("Push into corner " + i, pose(GARDEN_INTAKE), null, true, null, PUSH_TIMEOUT));
+            }
+            steps.add(new Wait("Intake corner (wait)", GARDEN_INTAKE_SECONDS, true));
+        }
     }
 
     /*
@@ -518,6 +636,77 @@ public abstract class PedroAutoLM1 extends OpMode {
         boolean run() {
             intakePower = INTAKE_POWER;
             return timer.seconds() > seconds;
+        }
+    }
+
+    /*
+     * After the preloads: stay aimed and watch the preload cell's tags. Leaves as soon as the
+     * tag is gone (normal route), or after it has stayed visible for TAG_WATCH_SECONDS
+     * (shoot-again route). Adds the chosen route to the step list.
+     */
+    private class CheckPreloadCellTags extends Step {
+        final ElapsedTime watchTimer = new ElapsedTime();
+        final ElapsedTime sinceSeen = new ElapsedTime();
+
+        CheckPreloadCellTags(String name) {
+            super(name);
+        }
+
+        @Override
+        void begin() {
+            watchTimer.reset();
+            sinceSeen.reset();
+        }
+
+        @Override
+        boolean run() {
+            if (preloadCellTagVisible()) {
+                sinceSeen.reset();
+            }
+            if (sinceSeen.seconds() > TAG_LOST_GRACE_SECONDS) {
+                routeNote = String.format("tag gone at %.1f s: normal route", autoTimer.seconds());
+                addNormalRoute();
+                return true;
+            }
+            if (watchTimer.seconds() >= TAG_WATCH_SECONDS) {
+                routeNote = String.format("tag still seen at %.1f s: shoot-again route", autoTimer.seconds());
+                addShootAgainRoute();
+                return true;
+            }
+            return false;
+        }
+    }
+
+    // True if the Limelight currently sees a tag of the cell the preloads were shot into.
+    private boolean preloadCellTagVisible() {
+        int first = alliance() == FieldLM1.Alliance.RED ? RED_PRELOAD_CELL_FIRST_TAG : BLUE_PRELOAD_CELL_FIRST_TAG;
+        int last = alliance() == FieldLM1.Alliance.RED ? RED_PRELOAD_CELL_LAST_TAG : BLUE_PRELOAD_CELL_LAST_TAG;
+        LLResult result = limelight.getLatestResult();
+        if (result == null || !result.isValid() || result.getStaleness() > TAG_MAX_STALENESS_MS) {
+            return false;
+        }
+        for (LLResultTypes.FiducialResult tag : result.getFiducialResults()) {
+            int id = tag.getFiducialId();
+            if (id >= first && id <= last) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Runs once and finishes right away: used to pick the next part of the route at runtime.
+    private class Decide extends Step {
+        final Runnable action;
+
+        Decide(String name, Runnable action) {
+            super(name);
+            this.action = action;
+        }
+
+        @Override
+        boolean run() {
+            action.run();
+            return true;
         }
     }
 
