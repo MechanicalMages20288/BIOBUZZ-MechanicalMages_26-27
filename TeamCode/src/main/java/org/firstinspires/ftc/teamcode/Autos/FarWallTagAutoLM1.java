@@ -44,8 +44,10 @@ import org.firstinspires.ftc.teamcode.pedro.Constants;
  *
  * SEQUENCE
  *   1. WAIT    flywheel spins up; watch for that cell's tags (game manual 9.9).
- *   2. SHOOT   tags seen for TAG_CONFIRM_LOOPS loops in a row (or SHOOT_ANYWAY_SECONDS passed):
- *              wait until the flywheel is at speed, then feed all 4 balls.
+ *   2. SHOOT   tags seen for TAG_CONFIRM_LOOPS loops in a row: wait SHOT_DELAY_AFTER_TAGS_SECONDS
+ *              (lets the cell finish tipping), then wait until the flywheel has held its target
+ *              speed for AT_SPEED_HOLD_SECONDS, then feed all 4 balls.
+ *              (If no tags by SHOOT_ANYWAY_SECONDS: same, but without the delay.)
  *   3. PARK    drive to our loading zone.
  */
 public abstract class FarWallTagAutoLM1 extends OpMode {
@@ -64,8 +66,15 @@ public abstract class FarWallTagAutoLM1 extends OpMode {
     // ---------- Timing ----------
     // If the tags still haven't shown up by this time, shoot anyway (leaves time to park).
     public static double SHOOT_ANYWAY_SECONDS = 18;
+    // After the tags are seen, wait this long before shooting (lets the cell finish tipping).
+    public static double SHOT_DELAY_AFTER_TAGS_SECONDS = 3.0;
     public static double MIN_SPIN_UP_SECONDS = 2.0; // flywheel always gets at least this long
-    public static double SHOOT_READY_TIMEOUT = 3.0; // feed anyway if not at speed by then
+    // The flywheel must stay within LAUNCHER_TOLERANCE of its target this long before feeding,
+    // so it's fully and steadily up to speed (not just passing through it).
+    public static double AT_SPEED_HOLD_SECONDS = 0.3;
+    // Safety net only: if the flywheel STILL isn't at speed this long after the delay (e.g. very
+    // low battery), feed anyway so the auto doesn't sit there and miss the park.
+    public static double SHOOT_READY_TIMEOUT = 6.0;
     public static double FEED_SECONDS = 3;          // intake + transfer time for all 4 balls
     public static double DRIVE_TIMEOUT = 5.0;       // give up on a park leg after this long
     public static double AT_END_INCHES = 2.0;
@@ -98,6 +107,9 @@ public abstract class FarWallTagAutoLM1 extends OpMode {
     private final FireFeedforward fireFeedforward = new FireFeedforward(PedroAutoLM1.AUTO_FIRE_FEEDFORWARD);
     private final ElapsedTime autoTimer = new ElapsedTime();
     private final ElapsedTime stateTimer = new ElapsedTime();
+    private final ElapsedTime atSpeedTimer = new ElapsedTime(); // how long the flywheel has been at speed
+    private boolean wasAtSpeed = false;
+    private double shotDelay = 0; // delay before shooting for this shot (0 when shooting anyway)
 
     private State state = State.WAIT_FOR_TAGS;
     private Pose startPose;
@@ -186,18 +198,32 @@ public abstract class FarWallTagAutoLM1 extends OpMode {
             case WAIT_FOR_TAGS:
                 if (tagStreak >= TAG_CONFIRM_LOOPS) {
                     shootReason = String.format("tags seen at %.1f s", autoTimer.seconds());
+                    shotDelay = SHOT_DELAY_AFTER_TAGS_SECONDS;
                     enter(State.SHOOT);
                 } else if (autoTimer.seconds() > SHOOT_ANYWAY_SECONDS) {
                     shootReason = String.format("no tags by %.0f s, shooting anyway", SHOOT_ANYWAY_SECONDS);
+                    shotDelay = 0;
                     enter(State.SHOOT);
                 }
                 break;
 
             case SHOOT:
                 if (!feeding) {
+                    // Track how long the flywheel has stayed at its target speed.
                     boolean atSpeed = Math.abs(launcher.getVelocity() - shotVelocity) <= LAUNCHER_TOLERANCE;
+                    if (atSpeed && !wasAtSpeed) {
+                        atSpeedTimer.reset();
+                    }
+                    wasAtSpeed = atSpeed;
+                    boolean steadyAtSpeed = atSpeed && atSpeedTimer.seconds() >= AT_SPEED_HOLD_SECONDS;
+
+                    boolean delayDone = stateTimer.seconds() >= shotDelay;
                     boolean spunUp = autoTimer.seconds() >= MIN_SPIN_UP_SECONDS;
-                    if ((atSpeed && spunUp) || stateTimer.seconds() > SHOOT_READY_TIMEOUT) {
+                    boolean gaveUpWaiting = stateTimer.seconds() > shotDelay + SHOOT_READY_TIMEOUT;
+                    if (delayDone && ((steadyAtSpeed && spunUp) || gaveUpWaiting)) {
+                        if (gaveUpWaiting && !steadyAtSpeed) {
+                            shootReason += " (flywheel never reached speed, fed anyway)";
+                        }
                         feeding = true;
                         stateTimer.reset();
                     }
@@ -246,6 +272,12 @@ public abstract class FarWallTagAutoLM1 extends OpMode {
         if (!shootReason.isEmpty()) {
             telemetry.addData("Shot", shootReason);
         }
+        if (state == State.SHOOT) {
+            double delayLeft = shotDelay - stateTimer.seconds();
+            telemetry.addData("Shooting", feeding ? "FEEDING"
+                    : delayLeft > 0 ? String.format("waiting %.1f s after tags", delayLeft)
+                    : "waiting for flywheel to be fully at speed");
+        }
         telemetry.addData("Flywheel", "target %.0f, actual %.0f ticks/s", flywheel, launcher.getVelocity());
         telemetry.addData("Pose", "x %.1f, y %.1f, heading %.0f deg", p.x(), p.y(), Math.toDegrees(p.heading()));
         telemetry.update();
@@ -281,6 +313,7 @@ public abstract class FarWallTagAutoLM1 extends OpMode {
         state = next;
         stateTimer.reset();
         feeding = false;
+        wasAtSpeed = false;
     }
 
     // Drive the next park leg in a straight line without turning.
