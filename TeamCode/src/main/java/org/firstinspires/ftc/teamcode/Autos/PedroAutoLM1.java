@@ -106,7 +106,7 @@ public abstract class PedroAutoLM1 extends OpMode {
 
     // Park spot after the last shot (team's point). Heading 90 = same way the robot already
     // faces after shooting, so it just slides over without turning.
-    public static double[] PARK = {13, 115, 90};
+    public static double[] PARK = {10, 115, 90};
 
     // Which cell each shot aims at (true = audience-side cell, false = far-side cell).
     public static boolean SHOT_AUDIENCE_CELL = true;
@@ -125,6 +125,9 @@ public abstract class PedroAutoLM1 extends OpMode {
     // ---------- Shooter / intake (same as the teleop) ----------
     public static double INTAKE_POWER = 1;
     public static double TRANSFER_FEED_POWER = 1;
+    // When NOT shooting, the transfer turns slowly BACKWARD so balls can't slip through to the
+    // flywheel. Negative = backward. Shooting switches it to full forward (TRANSFER_FEED_POWER).
+    public static double TRANSFER_HOLD_POWER = -0.1;
     public static double INTAKE_FIRE_POWER = 1;
     public static double AIM_TOLERANCE_DEG = 3;
     public static double LAUNCHER_TOLERANCE = 50;
@@ -197,7 +200,7 @@ public abstract class PedroAutoLM1 extends OpMode {
     public void loop() {
         follower.update();
         intakePower = 0;
-        transferPower = 0;
+        transferPower = TRANSFER_HOLD_POWER;
         firing = false;
 
         String stepName = "DONE";
@@ -244,7 +247,7 @@ public abstract class PedroAutoLM1 extends OpMode {
         Pose cell = cell(SHOT_AUDIENCE_CELL);
 
         steps.add(new Shoot("Shoot preloads from start", cell));
-        steps.add(new Drive("Drive to garden", pose(GARDEN_APPROACH), null, true, null).passThrough());
+        steps.add(new Drive("Drive to garden", pose(GARDEN_APPROACH), null, false, null).passThrough());
         for (int i = 1; i <= INTAKE_PASSES; i++) {
             if (i > 1) {
                 steps.add(new Drive("Back out " + (i - 1), pose(GARDEN_BACK_OUT), null, true, null, PUSH_TIMEOUT));
@@ -254,22 +257,22 @@ public abstract class PedroAutoLM1 extends OpMode {
         steps.add(new Wait("Intake corner (wait)", GARDEN_INTAKE_SECONDS, true));
 
         Pose finalCell = cell(FINAL_SHOT_AUDIENCE_CELL);
-        steps.add(new Drive("Path 3 (back up the side)", pose(POINT_3), null, true, null).passThrough());
-        steps.add(new Drive("Path 4 (up the side)", pose(POINT_4), null, true, null));
-        steps.add(new Drive("Path 5 (to final shot)", pose(FINAL_SHOT), point(PATH_5_BEND), true, null));
+        steps.add(new Drive("Path 3 (back up the side)", pose(POINT_3), null, false, null).passThrough());
+        steps.add(new Drive("Path 4 (up the side)", pose(POINT_4), null, false, null));
+        steps.add(new Drive("Path 5 (to final shot)", pose(FINAL_SHOT), point(PATH_5_BEND), false, null));
         // Shoot turns in place so the back points straight at the cell, then fires.
         steps.add(new Shoot("Final shot", finalCell, SHOT_2_MIN_SPIN_UP_SECONDS));
 
         // Flower intake, then back to the same shot spot.
         double[] flowerBack = {FLOWER_INTAKE[0], FLOWER_INTAKE[1] + FLOWER_SLOW_PUSH_IN - FLOWER_BACK_UP_IN, FLOWER_INTAKE[2]};
-        steps.add(new Drive("Drive to flower", pose(FLOWER_APPROACH), null, true, null));
+        steps.add(new Drive("Drive to flower", pose(FLOWER_APPROACH), null, false, null));
         steps.add(new FlowerServo("Lower flower intake", BasicTeleopLM1.FLOWER_DOWN_POSITION, FLOWER_LOWER_SECONDS));
         steps.add(new Drive("Intake flower (forward)", pose(FLOWER_INTAKE), null, true, null));
         steps.add(new SlowPush("Slow push into flower", FLOWER_SLOW_PUSH_IN, FLOWER_SLOW_POWER, FLOWER_SLOW_TIMEOUT));
         steps.add(new Wait("Intake flower (wait)", FLOWER_INTAKE_WAIT_SECONDS, true));
         steps.add(new Drive("Back up " + FLOWER_BACK_UP_IN + " in", pose(flowerBack), null, true, null));
         steps.add(new FlowerServo("Raise flower intake", BasicTeleopLM1.FLOWER_UP_POSITION, FLOWER_SERVO_SECONDS));
-        steps.add(new Drive("Back to shot spot", pose(FINAL_SHOT), null, true, null));
+        steps.add(new Drive("Back to shot spot", pose(FINAL_SHOT), null, false, null));
         steps.add(new Shoot("Flower shot", finalCell));
 
         // Park: straight into the park zone, keeping the same heading so there's no turn.
