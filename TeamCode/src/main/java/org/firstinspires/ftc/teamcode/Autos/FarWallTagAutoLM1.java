@@ -83,8 +83,8 @@ public abstract class FarWallTagAutoLM1 extends OpMode {
     // ---------- Shooter ----------
     // 0 = pick the speed from the distance to the cell (FlywheelSpeedModel). Otherwise a fixed speed.
     public static double SHOT_VELOCITY_OVERRIDE = 0;
-    // Added to the distance-based speed (all autos shoot 30 ticks/s slower).
-    public static double MODEL_SPEED_TRIM = -30;
+    // Added to the distance-based speed (all autos shoot 50 ticks/s slower).
+    public static double MODEL_SPEED_TRIM = -50;
     public static double LAUNCHER_TOLERANCE = 50;
     public static double INTAKE_FIRE_POWER = 1;
     public static double TRANSFER_FEED_POWER = 1;

@@ -121,7 +121,7 @@ public abstract class PedroAutoLM1 extends OpMode {
      */
     // y 48: 2 in toward the far side from the original 46.
     public static double[] SIDE_FLOWER_APPROACH = {31.62, 48, 180};
-    public static double[] SIDE_FLOWER_INTAKE = {11.77, 48, 180};
+    public static double[] SIDE_FLOWER_INTAKE = {13, 48, 180};
     // Side flower backs out 2 in more than the top flower before lifting the servo.
     public static double SIDE_FLOWER_BACK_UP_IN = 8;
 
@@ -177,7 +177,7 @@ public abstract class PedroAutoLM1 extends OpMode {
     public static double AIM_TOLERANCE_DEG = 3;
     public static double LAUNCHER_TOLERANCE = 50;
     // Fixed shot speed (ticks/s), same launcher PIDF (F = 14.4) and fire feedforward as the teleop.
-    public static double SHOT_VELOCITY = 1550;
+    public static double SHOT_VELOCITY = 1530;
 
     private Follower follower;
     private Limelight3A limelight;

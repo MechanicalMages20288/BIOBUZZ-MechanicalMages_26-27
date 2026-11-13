@@ -159,7 +159,7 @@ public class BasicTeleopLM1 extends OpMode {
      */
     public static String FLOWER_SERVO_NAME = "servo";
     public static double FLOWER_UP_POSITION = 0.31;
-    public static double FLOWER_DOWN_POSITION = 0.96;
+    public static double FLOWER_DOWN_POSITION = 0.86;
     boolean flowerDown = false;
     boolean xWasDown = false;
 
