@@ -100,13 +100,13 @@ public abstract class PedroAutoLM1 extends OpMode {
     public static double FLOWER_SLOW_POWER = 0.3;        // drive power (0-1)
     public static double FLOWER_SLOW_TIMEOUT = 1.5;      // give up if the flower stops it
     public static double FLOWER_INTAKE_WAIT_SECONDS = 1.75; // stay at the flower, intaking
-    public static double FLOWER_BACK_UP_IN = 3;        // back up this far before raising the servo
+    public static double FLOWER_BACK_UP_IN = 6;        // back up this far BEFORE raising the servo
     public static double FLOWER_SERVO_SECONDS = 0.2;   // time for the servo to move (raising)
     public static double FLOWER_LOWER_SECONDS = 1.0;   // after lowering: wait for the attachment to tip
 
     // Park spot after the last shot (team's point). Heading 90 = same way the robot already
     // faces after shooting, so it just slides over without turning.
-    public static double[] PARK = {10, 115, 90};
+    public static double[] PARK = {10, 122, 90};
 
     // Which cell each shot aims at (true = audience-side cell, false = far-side cell).
     public static boolean SHOT_AUDIENCE_CELL = true;
@@ -152,6 +152,9 @@ public abstract class PedroAutoLM1 extends OpMode {
     // Auto's own firing feedforward, a bit stronger than the teleop's (FireFeedforward.FIRE_FEEDFORWARD = 200).
     public static double AUTO_FIRE_FEEDFORWARD = 290;
     private final FireFeedforward fireFeedforward = new FireFeedforward(AUTO_FIRE_FEEDFORWARD);
+    // First shot (preloads from the start) gets a stronger boost.
+    public static double FIRST_SHOT_FIRE_FEEDFORWARD = 390;
+    private final FireFeedforward firstShotFeedforward = new FireFeedforward(FIRST_SHOT_FIRE_FEEDFORWARD);
     private final ElapsedTime autoTimer = new ElapsedTime();
 
     @Override
@@ -200,7 +203,8 @@ public abstract class PedroAutoLM1 extends OpMode {
     public void loop() {
         follower.update();
         intakePower = 0;
-        transferPower = TRANSFER_HOLD_POWER;
+        // Slow backward hold only after the first shot (step 0); off before/during it.
+        transferPower = stepIndex == 0 ? 0 : TRANSFER_HOLD_POWER;
         firing = false;
 
         String stepName = "DONE";
@@ -217,7 +221,8 @@ public abstract class PedroAutoLM1 extends OpMode {
             }
         }
 
-        launcher.setVelocity(fireFeedforward.command((int) Math.round(flywheelTarget), launcher.getVelocity(), firing));
+        FireFeedforward ff = stepIndex == 0 ? firstShotFeedforward : fireFeedforward;
+        launcher.setVelocity(ff.command((int) Math.round(flywheelTarget), launcher.getVelocity(), firing));
         intake.setPower(intakePower);
         transfer.setPower(transferPower);
 

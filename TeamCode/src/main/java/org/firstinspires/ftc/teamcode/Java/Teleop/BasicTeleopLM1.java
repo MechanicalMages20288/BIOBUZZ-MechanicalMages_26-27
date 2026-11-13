@@ -107,6 +107,10 @@ public class BasicTeleopLM1 extends OpMode {
     // Transfer power while outtaking with B (opposite of feeding).
     public final double TRANSFER_OUTTAKE_POWER = -TRANSFER_FEED_POWER;
 
+    // When not firing or outtaking, the transfer turns slowly BACKWARD so balls can't slip
+    // through to the flywheel (same as the auto). Negative = backward.
+    public static double TRANSFER_HOLD_POWER = -0.1;
+
     // Intake power while firing, so the intake also pushes balls up into the transfer.
     public final double INTAKE_FIRE_POWER = 1;
 
@@ -129,7 +133,9 @@ public class BasicTeleopLM1 extends OpMode {
     public int launcherTargetVelocity = LAUNCHER_DEFAULT_VELOCITY;
 
     // Raises the flywheel target during a burst so balls 2-4 land with ball 1.
-    final FireFeedforward fireFeedforward = new FireFeedforward();
+    // Same boost as the auto's first shot; the 0.5 s cutoff (FireFeedforward.BOOST_WINDOW_SECONDS) applies.
+    public static double TELEOP_FIRE_FEEDFORWARD = 390;
+    final FireFeedforward fireFeedforward = new FireFeedforward(TELEOP_FIRE_FEEDFORWARD);
     public final int LAUNCHER_MIN_VELOCITY = 1000;
 
     // How close (in ticks/s) the launcher must be to the target to count as "at speed".
@@ -461,7 +467,7 @@ public class BasicTeleopLM1 extends OpMode {
             // Outtake: run the transfer backward too, pushing balls back out (clears jams).
             transfer.setPower(TRANSFER_OUTTAKE_POWER);
         } else {
-            transfer.setPower(0);
+            transfer.setPower(TRANSFER_HOLD_POWER);
         }
     }
 
