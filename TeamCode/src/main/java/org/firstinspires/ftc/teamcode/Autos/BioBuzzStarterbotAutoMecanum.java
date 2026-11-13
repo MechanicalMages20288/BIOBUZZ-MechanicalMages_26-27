@@ -66,7 +66,7 @@ public class BioBuzzStarterbotAutoMecanum extends OpMode {
      * Launcher speeds in encoder ticks per second (same units as the teleop).
      * 1650 ticks/s is about 3540 RPM. Tuned with FlywheelPIDFTuner.
      */
-    public final int LAUNCHER_TARGET_VELOCITY = 1620;
+    public final int LAUNCHER_TARGET_VELOCITY = 1600;
     public final int LAUNCHER_MIN_VELOCITY = 1600;
 
     /*
