@@ -35,8 +35,27 @@ public class FireFeedforward {
     // Never boost the target by more than this.
     public static double MAX_BOOST = 900;
 
+    /*
+     * Boost only during the first part of each shooting sequence: balls 1-3 go back to back and
+     * need it, but ball 4 lags behind and would go long if the wheel were still boosted.
+     * Measured from when firing starts (trigger pulled / auto starts feeding).
+     */
+    public static double BOOST_WINDOW_SECONDS = 0.5;
+
     // How quickly the pre-fire speed follows the real speed while not firing (0-1 per loop).
     public static double READY_SPEED_FILTER = 0.3;
+
+    // This instance's fixed boost (the auto can use a different one than the teleop).
+    private final double feedforward;
+
+    // Uses FIRE_FEEDFORWARD (the teleop value).
+    public FireFeedforward() {
+        this(FIRE_FEEDFORWARD);
+    }
+
+    public FireFeedforward(double feedforward) {
+        this.feedforward = feedforward;
+    }
 
     private double readySpeed = Double.NaN;
     private boolean firstShotSeen = false;
@@ -44,6 +63,8 @@ public class FireFeedforward {
     private double lowestThisBurst = Double.NaN;
     private double lowestLastBurst = Double.NaN;
     private boolean wasFiring = false;
+    private long firingStartNs = 0;
+    private boolean windowOver = false;
 
     /*
      * Call once per loop. Returns the target to send to launcher.setVelocity().
@@ -61,10 +82,12 @@ public class FireFeedforward {
             firstShotSeen = false;
             boost = 0;
             wasFiring = false;
+            windowOver = false;
             return baseTarget;
         }
 
         if (!wasFiring) {
+            firingStartNs = System.nanoTime();
             lowestThisBurst = actual;
             if (Double.isNaN(readySpeed)) readySpeed = actual;
         }
@@ -75,8 +98,9 @@ public class FireFeedforward {
         if (drop > SHOT_DETECT_DROP) {
             firstShotSeen = true;
         }
-        boost = firstShotSeen
-                ? Math.max(0, Math.min(MAX_BOOST, FIRE_FEEDFORWARD + RECOVERY_GAIN * drop))
+        windowOver = (System.nanoTime() - firingStartNs) / 1e9 > BOOST_WINDOW_SECONDS;
+        boost = (firstShotSeen && !windowOver)
+                ? Math.max(0, Math.min(MAX_BOOST, feedforward + RECOVERY_GAIN * drop))
                 : 0;
         return (int) Math.round(baseTarget + boost);
     }
@@ -87,7 +111,7 @@ public class FireFeedforward {
     }
 
     public boolean boosting() {
-        return firstShotSeen;
+        return firstShotSeen && !windowOver;
     }
 
     // Wheel speed just before the current/last burst started.

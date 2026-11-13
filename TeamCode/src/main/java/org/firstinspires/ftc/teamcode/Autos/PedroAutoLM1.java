@@ -13,12 +13,14 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
+import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.teamcode.Java.Field.FieldLM1;
 import org.firstinspires.ftc.teamcode.Java.Field.PoseStorage;
 import org.firstinspires.ftc.teamcode.Java.Shooter.FireFeedforward;
 import org.firstinspires.ftc.teamcode.Java.Shooter.FlywheelSpeedModel;
+import org.firstinspires.ftc.teamcode.Java.Teleop.BasicTeleopLM1;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
 
 import java.util.ArrayList;
@@ -32,10 +34,15 @@ import java.util.List;
  *   2. Shoot the preloads FROM THE START SPOT (turns in place so the back points at the
  *      audience-side cell) at a fixed SHOT_VELOCITY of 1560 ticks/s, with the same fire
  *      feedforward as the teleop (balls 2-4 get boosted).
- *   3. Drive to the corner garden on the wall, front (intake) first, and intake for 2 s.
+ *   3. Drive into the corner (side close to the red wall, front into the audience wall),
+ *      intake on, then back out and push in again INTAKE_PASSES times to grab wall balls.
  *   4. Back up the red side (paths 3 and 4, shooter first), then drive to the final shot
  *      spot (path 5, intake first). The intake keeps running to hold the balls.
  *   5. Turn in place so the BACK (shooter) points straight at the far-side cell, and shoot.
+ *   6. Flower: drive to FLOWER_APPROACH, lower the flower servo, drive forward to
+ *      FLOWER_INTAKE while intaking, back up FLOWER_BACK_UP_IN, raise the flower servo,
+ *      return to the final shot spot and shoot again.
+ *   7. Park: drive straight into the park zone at PARK.
  *
  * Positions are in the FieldLM1 frame (inches): x from the red wall (0) to the blue wall (144),
  * y from the audience side (0) to the far side (144), heading 0 = toward the blue wall, CCW
@@ -55,30 +62,56 @@ public abstract class PedroAutoLM1 extends OpMode {
      * heading is -90 (270). The visualizer file had 90, which would mean the INTAKE faces the
      * hive; -90 matches "shooter facing the goal".
      */
-    public static double[] START = {56, 8, -90};
-    // Path 1: to the garden approach, still facing the wall (front first).
-    public static double[] GARDEN_APPROACH = {15.0395, 23.0705, -90};
-    // Path 2: into the wall garden, front (intake) first. Visualizer "tangential" heading =
-    // facing the direction of travel, which is -93.6 deg here.
-    // 4 in deeper into the balls than the visualizer point (14.1896, 9.3797), same direction.
-    public static double[] GARDEN_INTAKE = {13.9416, 5.3877, -93.5521};
+    public static double[] START = {58, 12, -90};
+    /*
+     * Corner intake. x = 10 pushes the robot's side about 2 in into the red wall (robot is 24 in
+     * wide). Pushes go to y = 8, a few inches past where the front meets the audience wall
+     * (center y = 12), so the intake presses into the balls; each push gives up after
+     * PUSH_TIMEOUT once the wall stops it.
+     */
+    // Path 1: line up above the corner, facing the audience wall (front first).
+    public static double[] GARDEN_APPROACH = {8, 24, -90};
+    // Path 2: push into the corner, front (intake) first.
+    public static double[] GARDEN_INTAKE = {8, 8, -90};
+    // Back out to here between pushes, then push in again.
+    public static double[] GARDEN_BACK_OUT = {10, 20, -90};
+    public static int INTAKE_PASSES = 2;          // total pushes into the corner (1 + 2 more)
+    public static double PUSH_TIMEOUT = 1;     // seconds per push / back-out
 
     // Path 3: back out of the garden up the red side, shooter (back) first.
     public static double[] POINT_3 = {26.1485, 63.593, -102.4396};
     // Path 4: keep going up the red side, shooter first.
     public static double[] POINT_4 = {27.3506, 117.0332, -91.2886};
-    // Path 5: across to the final shot spot, intake first.
-    public static double[] FINAL_SHOT = {62.3445, 120.1809, 5.14};
+    // Path 5: to the final shot spot = the START mirrored to the far side (y -> 144 - y, heading
+    // flipped): front toward the far wall, shooter toward the hive.
+    // 1 in closer to the far-side red cell than (59, 136), along the line to the cell.
+    public static double[] FINAL_SHOT = {58.97, 135.00, 90};
+    // Path 5 curves through here: dips right/down from point 4, then swings up into the shot
+    // spot (the team's drawn route). Pedro curve control point (x, y).
+    public static double[] PATH_5_BEND = {55, 105};
+
+    // Flower (top wall), from the team's visualizer file. Front (intake) toward the flower.
+    public static double[] FLOWER_APPROACH = {46.5874, 109.8841, 90};
+    // 9.5 in further into the flower than the visualizer point (y 121.231).
+    public static double[] FLOWER_INTAKE = {46.5873, 130.731, 90};
+    public static double FLOWER_INTAKE_WAIT_SECONDS = 1.5; // stay at the flower, intaking
+    public static double FLOWER_BACK_UP_IN = 4;        // back up this far before raising the servo
+    public static double FLOWER_SERVO_SECONDS = 0.2;   // time for the servo to move (raising)
+    public static double FLOWER_LOWER_SECONDS = 1.0;   // after lowering: wait for the attachment to tip
+
+    // Park spot after the last shot (team's point). Heading 90 = same way the robot already
+    // faces after shooting, so it just slides over without turning.
+    public static double[] PARK = {13, 115, 90};
 
     // Which cell each shot aims at (true = audience-side cell, false = far-side cell).
     public static boolean SHOT_AUDIENCE_CELL = true;
     public static boolean FINAL_SHOT_AUDIENCE_CELL = false;
 
     // ---------- Timing ----------
-    public static double FEED_SECONDS = 3.5;          // how long to run intake + transfer per volley
+    public static double FEED_SECONDS = 3;          // how long to run intake + transfer per volley
     public static double MIN_SPIN_UP_SECONDS = 2.0;   // always wait at least this long before feeding
     public static double SHOOT_READY_TIMEOUT = 4.0;   // feed anyway if not aimed/at speed by then
-    public static double GARDEN_INTAKE_SECONDS = 2.0; // extra intake time after reaching the garden
+    public static double GARDEN_INTAKE_SECONDS = 0.5; // extra intake time after the last push
     public static double DRIVE_TIMEOUT = 4.0;         // give up on a drive after this long
     public static double AT_END_INCHES = 2.0;         // a drive is done this close to its end
 
@@ -89,12 +122,13 @@ public abstract class PedroAutoLM1 extends OpMode {
     public static double AIM_TOLERANCE_DEG = 3;
     public static double LAUNCHER_TOLERANCE = 50;
     // Fixed shot speed (ticks/s), same launcher PIDF (F = 14.4) and fire feedforward as the teleop.
-    public static double SHOT_VELOCITY = 1560;
+    public static double SHOT_VELOCITY = 1580;
 
     private Follower follower;
     private DcMotorEx launcher;
     private DcMotor intake;
     private DcMotor transfer;
+    private Servo flowerServo;
 
     private final List<Step> steps = new ArrayList<>();
     private int stepIndex = 0;
@@ -105,7 +139,9 @@ public abstract class PedroAutoLM1 extends OpMode {
     private double transferPower = 0;
     // True while a Shoot step is feeding balls; FireFeedforward boosts the flywheel after ball 1.
     private boolean firing = false;
-    private final FireFeedforward fireFeedforward = new FireFeedforward();
+    // Auto's own firing feedforward, a bit stronger than the teleop's (FireFeedforward.FIRE_FEEDFORWARD = 200).
+    public static double AUTO_FIRE_FEEDFORWARD = 290;
+    private final FireFeedforward fireFeedforward = new FireFeedforward(AUTO_FIRE_FEEDFORWARD);
     private final ElapsedTime autoTimer = new ElapsedTime();
 
     @Override
@@ -123,6 +159,8 @@ public abstract class PedroAutoLM1 extends OpMode {
         intake = hardwareMap.get(DcMotor.class, "intake");
         intake.setZeroPowerBehavior(BRAKE);
         transfer = hardwareMap.get(DcMotor.class, "transfer");
+        // Flower servo: same name and up/down positions as the teleop.
+        flowerServo = hardwareMap.get(Servo.class, BasicTeleopLM1.FLOWER_SERVO_NAME);
         transfer.setDirection(DcMotorSimple.Direction.REVERSE);
         transfer.setZeroPowerBehavior(BRAKE);
 
@@ -144,6 +182,8 @@ public abstract class PedroAutoLM1 extends OpMode {
         // Set again at START in case the Pinpoint was still resetting during INIT.
         follower.setPose(pose(START));
         autoTimer.reset();
+        // Servo doesn't move until START.
+        flowerServo.setPosition(BasicTeleopLM1.FLOWER_UP_POSITION);
     }
 
     @Override
@@ -197,16 +237,35 @@ public abstract class PedroAutoLM1 extends OpMode {
         Pose cell = cell(SHOT_AUDIENCE_CELL);
 
         steps.add(new Shoot("Shoot preloads from start", cell));
-        steps.add(new Drive("Drive to garden", pose(GARDEN_APPROACH), null, true, null));
-        steps.add(new Drive("Intake garden", pose(GARDEN_INTAKE), null, true, null));
-        steps.add(new Wait("Intake garden (wait)", GARDEN_INTAKE_SECONDS, true));
+        steps.add(new Drive("Drive to garden", pose(GARDEN_APPROACH), null, true, null).passThrough());
+        for (int i = 1; i <= INTAKE_PASSES; i++) {
+            if (i > 1) {
+                steps.add(new Drive("Back out " + (i - 1), pose(GARDEN_BACK_OUT), null, true, null, PUSH_TIMEOUT));
+            }
+            steps.add(new Drive("Push into corner " + i, pose(GARDEN_INTAKE), null, true, null, PUSH_TIMEOUT));
+        }
+        steps.add(new Wait("Intake corner (wait)", GARDEN_INTAKE_SECONDS, true));
 
         Pose finalCell = cell(FINAL_SHOT_AUDIENCE_CELL);
-        steps.add(new Drive("Path 3 (back up the side)", pose(POINT_3), null, true, null));
+        steps.add(new Drive("Path 3 (back up the side)", pose(POINT_3), null, true, null).passThrough());
         steps.add(new Drive("Path 4 (up the side)", pose(POINT_4), null, true, null));
-        steps.add(new Drive("Path 5 (to final shot)", pose(FINAL_SHOT), null, true, null));
+        steps.add(new Drive("Path 5 (to final shot)", pose(FINAL_SHOT), point(PATH_5_BEND), true, null));
         // Shoot turns in place so the back points straight at the cell, then fires.
         steps.add(new Shoot("Final shot", finalCell));
+
+        // Flower intake, then back to the same shot spot.
+        double[] flowerBack = {FLOWER_INTAKE[0], FLOWER_INTAKE[1] - FLOWER_BACK_UP_IN, FLOWER_INTAKE[2]};
+        steps.add(new Drive("Drive to flower", pose(FLOWER_APPROACH), null, true, null));
+        steps.add(new FlowerServo("Lower flower intake", BasicTeleopLM1.FLOWER_DOWN_POSITION, FLOWER_LOWER_SECONDS));
+        steps.add(new Drive("Intake flower (forward)", pose(FLOWER_INTAKE), null, true, null));
+        steps.add(new Wait("Intake flower (wait)", FLOWER_INTAKE_WAIT_SECONDS, true));
+        steps.add(new Drive("Back up " + FLOWER_BACK_UP_IN + " in", pose(flowerBack), null, true, null));
+        steps.add(new FlowerServo("Raise flower intake", BasicTeleopLM1.FLOWER_UP_POSITION, FLOWER_SERVO_SECONDS));
+        steps.add(new Drive("Back to shot spot", pose(FINAL_SHOT), null, true, null));
+        steps.add(new Shoot("Flower shot", finalCell));
+
+        // Park: straight into the park zone, keeping the same heading so there's no turn.
+        steps.add(new Drive("Park", pose(PARK), null, false, null));
     }
 
     // ---------- Steps ----------
@@ -235,14 +294,28 @@ public abstract class PedroAutoLM1 extends OpMode {
         final Pose bend;
         final boolean runIntake;
         final Pose spinFor;
+        final double timeout;
         final ElapsedTime timer = new ElapsedTime();
+        // Pass-through: don't brake to a stop at the end; hand straight over to the next path
+        // so the robot keeps its speed (only where the next path keeps going the same way).
+        boolean passThrough = false;
+
+        Drive passThrough() {
+            passThrough = true;
+            return this;
+        }
 
         Drive(String name, Pose end, Pose bend, boolean runIntake, Pose spinFor) {
+            this(name, end, bend, runIntake, spinFor, DRIVE_TIMEOUT);
+        }
+
+        Drive(String name, Pose end, Pose bend, boolean runIntake, Pose spinFor, double timeout) {
             super(name);
             this.end = end;
             this.bend = bend;
             this.runIntake = runIntake;
             this.spinFor = spinFor;
+            this.timeout = timeout;
         }
 
         @Override
@@ -251,7 +324,11 @@ public abstract class PedroAutoLM1 extends OpMode {
             // Turn the short way to the end heading.
             double endHeading = start.heading() + wrap(end.heading() - start.heading());
             Path path = (bend == null) ? line(start, end) : curve(start, bend, end);
-            follower.follow(path.linear(start.heading(), endHeading));
+            path = path.linear(start.heading(), endHeading);
+            if (passThrough) {
+                path = path.with(Constants.foresightConfig.brakeAtEnd.at(false));
+            }
+            follower.follow(path);
             if (spinFor != null) {
                 flywheelTarget = FlywheelSpeedModel.velocityForDistance(end.distance(spinFor));
             }
@@ -263,8 +340,12 @@ public abstract class PedroAutoLM1 extends OpMode {
             if (runIntake) {
                 intakePower = INTAKE_POWER;
             }
+            if (passThrough) {
+                // Next path starts right away, at full speed.
+                return follower.atParametricEnd() || timer.seconds() > timeout;
+            }
             boolean arrived = follower.atParametricEnd() && follower.distanceToEndpoint() < AT_END_INCHES;
-            if (arrived || timer.seconds() > DRIVE_TIMEOUT) {
+            if (arrived || timer.seconds() > timeout) {
                 follower.hold(end);
                 return true;
             }
@@ -312,6 +393,31 @@ public abstract class PedroAutoLM1 extends OpMode {
             intakePower = INTAKE_FIRE_POWER;
             firing = true;
             return feedTimer.seconds() > FEED_SECONDS;
+        }
+    }
+
+    // Move the flower servo and give it time to get there (intake keeps running).
+    private class FlowerServo extends Step {
+        final double position;
+        final double seconds;
+        final ElapsedTime timer = new ElapsedTime();
+
+        FlowerServo(String name, double position, double seconds) {
+            super(name);
+            this.position = position;
+            this.seconds = seconds;
+        }
+
+        @Override
+        void begin() {
+            flowerServo.setPosition(position);
+            timer.reset();
+        }
+
+        @Override
+        boolean run() {
+            intakePower = INTAKE_POWER;
+            return timer.seconds() > seconds;
         }
     }
 
