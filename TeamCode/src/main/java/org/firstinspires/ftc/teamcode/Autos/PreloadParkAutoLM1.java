@@ -39,6 +39,9 @@ import org.firstinspires.ftc.teamcode.Java.Shooter.LauncherVoltageComp;
  *   2. PARK   slide off the wall, drive up along our alliance wall (shooter first, same red-side
  *             points as PedroAutoLM1), then into the loading zone.
  *
+ * Final limit: with PedroAutoLM1.PARK_AT_SECONDS_LEFT (2 s) left, if it is still shooting it
+ * stops and drives straight to the loading zone.
+ *
  * The start spot, shot speed and fire feedforward come from PedroAutoLM1, so tuning those there
  * tunes this auto too.
  */
@@ -154,6 +157,15 @@ public abstract class PreloadParkAutoLM1 extends OpMode {
         // Not shooting: transfer turns slowly backward so balls can't slip into the flywheel.
         double transferPower = PedroAutoLM1.TRANSFER_HOLD_POWER;
         boolean firing = false;
+
+        // Final limit: 2 s left and still shooting -> straight to the loading zone (last leg).
+        if (state == State.SHOOT
+                && PedroAutoLM1.AUTO_SECONDS - autoTimer.seconds() <= PedroAutoLM1.PARK_AT_SECONDS_LEFT) {
+            shotNote = "2 s left: parking";
+            parkLeg = parkLegs.length - 1;
+            enter(State.PARK);
+            startParkLeg();
+        }
 
         switch (state) {
             case SHOOT:

@@ -50,6 +50,9 @@ import org.firstinspires.ftc.teamcode.Java.Shooter.LauncherVoltageComp;
  *              speed for AT_SPEED_HOLD_SECONDS, then feed all 4 balls.
  *              (If no tags by SHOOT_ANYWAY_SECONDS: same, but without the delay.)
  *   3. PARK    drive to our loading zone.
+ *
+ * Final limit: with PedroAutoLM1.PARK_AT_SECONDS_LEFT (2 s) left it stops waiting / shooting
+ * and parks.
  */
 public abstract class FarWallTagAutoLM1 extends OpMode {
 
@@ -198,6 +201,15 @@ public abstract class FarWallTagAutoLM1 extends OpMode {
         double intakePower = 0;
         double transferPower = 0;
         boolean firing = false;
+
+        // Final limit: 2 s left and still waiting or shooting -> go park now.
+        if ((state == State.WAIT_FOR_TAGS || state == State.SHOOT)
+                && PedroAutoLM1.AUTO_SECONDS - autoTimer.seconds() <= PedroAutoLM1.PARK_AT_SECONDS_LEFT) {
+            shootReason += shootReason.isEmpty() ? "2 s left: parking" : " | 2 s left: parking";
+            parkLeg = 0;
+            enter(State.PARK);
+            startParkLeg();
+        }
 
         switch (state) {
             case WAIT_FOR_TAGS:

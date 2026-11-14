@@ -61,6 +61,17 @@ import java.util.List;
  *     there isn't enough time left (RETURN_SHOT_SECONDS_NEEDED / FLOWER_TRIP_SECONDS_NEEDED)
  *     it skips straight to parking.
  *
+ * HIVE CHECK AT THE FIRST FAR-SIDE SHOT (only Red/BlueHiveCheck2xFlowerAutoLM1;
+ * useHiveCheck() = true): on arriving at the final shot spot the robot aims at the far-side
+ * cell and the Limelight looks for that cell's tags (red far-side cell 30-33, blue
+ * audience-side cell 38-41), the same test as FarWallTagAutoLM1 but with no wait after them.
+ *   - Tags seen (cell tipped up toward us): shoot right away and carry on with the route above.
+ *   - No tags within HIVE_CHECK_SECONDS: don't shoot. Turn around, drive down the lane between
+ *     the two hives (MIDDLE_LANE_*), shoot the preload cell from START, then park up the side.
+ *
+ * FINAL PARK (every auto): when PARK_AT_SECONDS_LEFT (2 s) are left and the robot isn't already
+ * parking, it drops whatever it is doing and drives straight to PARK.
+ *
  * Positions are in the FieldLM1 frame (inches): x from the red wall (0) to the blue wall (144),
  * y from the audience side (0) to the far side (144), heading 0 = toward the blue wall, CCW
  * positive. ALL POSITIONS ARE FIRST GUESSES from the field drawing: test and adjust below.
@@ -137,6 +148,16 @@ public abstract class PedroAutoLM1 extends OpMode {
     // faces after shooting, so it just slides over without turning.
     public static double[] PARK = {10, 122, 90};
 
+    /*
+     * Hive-check autos, far cell NOT tipped: lane between the red and blue hives, driven from the
+     * far side to the audience side. The robot turns around on the way to MIDDLE_LANE_TOP (clear
+     * of the hives) and then drives the lane without turning: the gap is only about 26 in.
+     */
+    // Team choice: centered on x = 58 so the robot stays on our half. NOTE: our red hive cells
+    // are measured at x ~58 (FieldLM1), so check this line is actually clear on the field.
+    public static double[] MIDDLE_LANE_TOP = {58, 116, -90};
+    public static double[] MIDDLE_LANE_BOTTOM = {58, 32, -90};
+
     // Which cell each shot aims at (true = audience-side cell, false = far-side cell).
     public static boolean SHOT_AUDIENCE_CELL = true;
     public static boolean FINAL_SHOT_AUDIENCE_CELL = false;
@@ -166,6 +187,18 @@ public abstract class PedroAutoLM1 extends OpMode {
     public static double AUTO_SECONDS = 30;
     public static double RETURN_SHOT_SECONDS_NEEDED = 13;  // drive back to start + shoot + park
     public static double FLOWER_TRIP_SECONDS_NEEDED = 18;  // up the side + top flower + far shot + park
+    // Final limit for EVERY auto: with this much time left, stop everything and go park.
+    public static double PARK_AT_SECONDS_LEFT = 2;
+
+    // ---------- Hive check at the first far-side shot (hive-check autos) ----------
+    // Tags and TAG_CONFIRM_LOOPS come from FarWallTagAutoLM1 (same cell, same test).
+    // Once aimed, look this long for the far cell's tags before deciding it isn't tipped up.
+    public static double HIVE_CHECK_SECONDS = 0.75;
+    // Start that countdown anyway if the robot still isn't aimed after this long.
+    public static double HIVE_AIM_TIMEOUT = 1.0;
+    // After turning around for the lane: wait until within this of the lane heading (or the timeout).
+    public static double LANE_HEADING_TOLERANCE_DEG = 6;
+    public static double LANE_TURN_TIMEOUT = 1.0;
 
     // ---------- Shooter / intake (same as the teleop) ----------
     public static double INTAKE_POWER = 1;
@@ -204,6 +237,8 @@ public abstract class PedroAutoLM1 extends OpMode {
     public static double FIRST_SHOT_FIRE_FEEDFORWARD = 390;
     private final FireFeedforward firstShotFeedforward = new FireFeedforward(FIRST_SHOT_FIRE_FEEDFORWARD);
     private final ElapsedTime autoTimer = new ElapsedTime();
+    // True once the 2-seconds-left park has taken over.
+    private boolean finalPark = false;
 
     @Override
     public void init() {
@@ -213,8 +248,8 @@ public abstract class PedroAutoLM1 extends OpMode {
         hardwareMap.get(GoBildaPinpointDriver.class, Constants.localizerConfig.name.get()).recalibrateIMU();
 
         // Limelight for the tag check after the preloads (same pipeline as the teleops).
-        // Only the Tag autos use it; the others don't touch the Limelight at all.
-        if (useTagCheck()) {
+        // Only the Tag and hive-check autos use it; the others don't touch the Limelight at all.
+        if (useTagCheck() || useHiveCheck()) {
             limelight = hardwareMap.get(Limelight3A.class, LimelightPositionLM1.LIMELIGHT_NAME);
             if (LimelightPositionLM1.UPLOAD_PIPELINE_AT_INIT) {
                 limelight.uploadPipeline(LimelightPositionLM1.PIPELINE_JSON, LimelightPositionLM1.APRILTAG_PIPELINE);
@@ -268,6 +303,12 @@ public abstract class PedroAutoLM1 extends OpMode {
         transferPower = stepIndex == 0 ? 0 : TRANSFER_HOLD_POWER;
         firing = false;
 
+        // Final limit: 2 s left and not parking yet -> drop the rest of the route and go park.
+        if (!finalPark && timeLeft() <= PARK_AT_SECONDS_LEFT
+                && stepIndex < steps.size() && !steps.get(stepIndex).isPark) {
+            startFinalPark();
+        }
+
         String stepName = "DONE";
         if (stepIndex < steps.size()) {
             Step step = steps.get(stepIndex);
@@ -313,6 +354,21 @@ public abstract class PedroAutoLM1 extends OpMode {
         transfer.setPower(0);
     }
 
+    // Replace everything that's left of the route with a straight drive to PARK (no turning).
+    private void startFinalPark() {
+        finalPark = true;
+        routeNote += String.format(" | %.1f s left: parking now", timeLeft());
+        while (steps.size() > stepIndex) {
+            steps.remove(steps.size() - 1);
+        }
+        stepStarted = false;
+        flywheelTarget = 0;
+        flowerServo.setPosition(BasicTeleopLM1.FLOWER_UP_POSITION);
+        Pose park = pose(PARK);
+        steps.add(new Drive("Park (time limit)", new Pose(park.x(), park.y(), follower.pose().heading()),
+                null, false, null).park());
+    }
+
     // ---------- Route ----------
 
     /*
@@ -345,6 +401,15 @@ public abstract class PedroAutoLM1 extends OpMode {
         return false;
     }
 
+    /*
+     * true (Red/BlueHiveCheck2xFlowerAutoLM1): at the first far-side shot, check with the
+     * Limelight that the far cell is tipped up; if not, cross the middle and shoot the preload
+     * cell instead.
+     */
+    protected boolean useHiveCheck() {
+        return false;
+    }
+
     // Tag gone: the original route. Intake, up the side to the final shot, top flower, shoot, park.
     private void addNormalRoute() {
         addFirstIntake();
@@ -353,8 +418,19 @@ public abstract class PedroAutoLM1 extends OpMode {
         steps.add(new Drive("Path 3 (back up the side)", pose(POINT_3), null, false, null).passThrough());
         steps.add(new Drive("Path 4 (up the side)", pose(POINT_4), null, false, null));
         steps.add(new Drive("Path 5 (to final shot)", pose(FINAL_SHOT), point(PATH_5_BEND), false, null));
+        if (useHiveCheck()) {
+            // Picks addFarShotRoute() (tipped up) or addCrossMiddleRoute() (not tipped).
+            steps.add(new CheckFarCellTags("Check far cell is tipped up", finalCell));
+        } else {
+            addFarShotRoute(SHOT_2_MIN_SPIN_UP_SECONDS);
+        }
+    }
+
+    // From the final shot spot: shoot the far cell, top flower, shoot again, park.
+    private void addFarShotRoute(double firstShotMinSpinUp) {
+        Pose finalCell = cell(FINAL_SHOT_AUDIENCE_CELL);
         // Shoot turns in place so the back points straight at the cell, then fires.
-        steps.add(new Shoot("Final shot", finalCell, SHOT_2_MIN_SPIN_UP_SECONDS));
+        steps.add(new Shoot("Final shot", finalCell, firstShotMinSpinUp));
 
         // Top flower intake, then back to the same shot spot.
         addFlowerIntake("top flower", FLOWER_APPROACH, FLOWER_INTAKE, FLOWER_BACK_UP_IN);
@@ -362,7 +438,22 @@ public abstract class PedroAutoLM1 extends OpMode {
         steps.add(new Shoot("Flower shot", finalCell));
 
         // Park: straight into the park zone, keeping the same heading so there's no turn.
-        steps.add(new Drive("Park", pose(PARK), null, false, null));
+        steps.add(new Drive("Park", pose(PARK), null, false, null).park());
+    }
+
+    /*
+     * Far cell not tipped up: from the final shot spot, turn around on the way to the top of the
+     * lane between the hives, drive the lane without turning, shoot the preload cell from START,
+     * then park up the side.
+     */
+    private void addCrossMiddleRoute() {
+        Pose laneTop = pose(MIDDLE_LANE_TOP);
+        steps.add(new Drive("To the middle lane (turn around)", laneTop, null, false, null));
+        steps.add(new WaitForHeading("Finish turning for the lane", laneTop.heading()));
+        steps.add(new Drive("Down the middle lane", pose(MIDDLE_LANE_BOTTOM), null, false, null).passThrough());
+        steps.add(new Drive("To the preload shot spot", pose(START), null, false, null));
+        steps.add(new Shoot("Shoot preload cell", cell(SHOT_AUDIENCE_CELL), SHOT_2_MIN_SPIN_UP_SECONDS));
+        addParkFromNearSide();
     }
 
     /*
@@ -392,16 +483,16 @@ public abstract class PedroAutoLM1 extends OpMode {
                 addFlowerIntake("top flower", FLOWER_APPROACH, FLOWER_INTAKE, FLOWER_BACK_UP_IN);
                 steps.add(new Drive("To final shot spot", pose(FINAL_SHOT), null, false, null));
                 steps.add(new Shoot("Far cell shot", finalCell));
-                steps.add(new Drive("Park", pose(PARK), null, false, null));
+                steps.add(new Drive("Park", pose(PARK), null, false, null).park());
             }));
         }));
     }
 
     // Park from the audience half: up the red side (shooter first, no turning), then into PARK.
     private void addParkFromNearSide() {
-        steps.add(new Drive("Park: up the side", pose(POINT_3), null, false, null).passThrough());
-        steps.add(new Drive("Park: up the side", pose(POINT_4), null, false, null));
-        steps.add(new Drive("Park", pose(new double[]{PARK[0], PARK[1], POINT_4[2]}), null, false, null));
+        steps.add(new Drive("Park: up the side", pose(POINT_3), null, false, null).passThrough().park());
+        steps.add(new Drive("Park: up the side", pose(POINT_4), null, false, null).park());
+        steps.add(new Drive("Park", pose(new double[]{PARK[0], PARK[1], POINT_4[2]}), null, false, null).park());
     }
 
     private double timeLeft() {
@@ -448,6 +539,8 @@ public abstract class PedroAutoLM1 extends OpMode {
 
     private abstract static class Step {
         final String name;
+        // True for the drives that park; the 2-seconds-left park leaves these alone.
+        boolean isPark = false;
 
         Step(String name) {
             this.name = name;
@@ -478,6 +571,11 @@ public abstract class PedroAutoLM1 extends OpMode {
 
         Drive passThrough() {
             passThrough = true;
+            return this;
+        }
+
+        Drive park() {
+            isPark = true;
             return this;
         }
 
@@ -677,10 +775,99 @@ public abstract class PedroAutoLM1 extends OpMode {
         }
     }
 
+    /*
+     * Hive check on arriving at the final shot spot: hold aimed at the far cell (flywheel already
+     * spinning) and look for that cell's tags. Seen TAG_CONFIRM_LOOPS loops in a row -> tipped
+     * up: shoot right away (addFarShotRoute). None within HIVE_CHECK_SECONDS of being aimed ->
+     * not tipped: addCrossMiddleRoute.
+     */
+    private class CheckFarCellTags extends Step {
+        final Pose cell;
+        final ElapsedTime stepTimer = new ElapsedTime();
+        final ElapsedTime lookTimer = new ElapsedTime();
+        double aimHeading;
+        boolean looking;
+        int tagStreak;
+
+        CheckFarCellTags(String name, Pose cell) {
+            super(name);
+            this.cell = cell;
+        }
+
+        @Override
+        void begin() {
+            Pose aimed = aimPose(follower.pose(), cell);
+            aimHeading = aimed.heading();
+            follower.hold(aimed);
+            flywheelTarget = SHOT_VELOCITY;
+            looking = false;
+            tagStreak = 0;
+            stepTimer.reset();
+        }
+
+        @Override
+        boolean run() {
+            tagStreak = farCellTagVisible() ? tagStreak + 1 : 0;
+            if (tagStreak >= FarWallTagAutoLM1.TAG_CONFIRM_LOOPS) {
+                routeNote = String.format("far cell tags seen at %.1f s: tipped up, shooting", autoTimer.seconds());
+                // The check already used part of the usual settle time before the shot.
+                addFarShotRoute(Math.max(0, SHOT_2_MIN_SPIN_UP_SECONDS - stepTimer.seconds()));
+                return true;
+            }
+            if (!looking) {
+                boolean aimed = Math.abs(Math.toDegrees(wrap(aimHeading - follower.pose().heading()))) <= AIM_TOLERANCE_DEG;
+                if (aimed || stepTimer.seconds() > HIVE_AIM_TIMEOUT) {
+                    looking = true;
+                    lookTimer.reset();
+                }
+            } else if (lookTimer.seconds() > HIVE_CHECK_SECONDS) {
+                routeNote = String.format("no far cell tags at %.1f s: not tipped, crossing the middle", autoTimer.seconds());
+                addCrossMiddleRoute();
+                return true;
+            }
+            return false;
+        }
+    }
+
+    // Hold position until the robot has turned to `heading` (or the timeout runs out).
+    private class WaitForHeading extends Step {
+        final double heading;
+        final ElapsedTime timer = new ElapsedTime();
+
+        WaitForHeading(String name, double heading) {
+            super(name);
+            this.heading = heading;
+        }
+
+        @Override
+        void begin() {
+            timer.reset();
+        }
+
+        @Override
+        boolean run() {
+            boolean turned = Math.abs(Math.toDegrees(wrap(heading - follower.pose().heading()))) <= LANE_HEADING_TOLERANCE_DEG;
+            return turned || timer.seconds() > LANE_TURN_TIMEOUT;
+        }
+    }
+
     // True if the Limelight currently sees a tag of the cell the preloads were shot into.
     private boolean preloadCellTagVisible() {
-        int first = alliance() == FieldLM1.Alliance.RED ? RED_PRELOAD_CELL_FIRST_TAG : BLUE_PRELOAD_CELL_FIRST_TAG;
-        int last = alliance() == FieldLM1.Alliance.RED ? RED_PRELOAD_CELL_LAST_TAG : BLUE_PRELOAD_CELL_LAST_TAG;
+        boolean red = alliance() == FieldLM1.Alliance.RED;
+        return tagVisible(red ? RED_PRELOAD_CELL_FIRST_TAG : BLUE_PRELOAD_CELL_FIRST_TAG,
+                red ? RED_PRELOAD_CELL_LAST_TAG : BLUE_PRELOAD_CELL_LAST_TAG);
+    }
+
+    // True if the Limelight currently sees a tag of the cell the final shot goes into
+    // (red far-side cell / blue audience-side cell: the FarWallTagAutoLM1 cell).
+    private boolean farCellTagVisible() {
+        boolean red = alliance() == FieldLM1.Alliance.RED;
+        return tagVisible(red ? FarWallTagAutoLM1.RED_CELL_FIRST_TAG : FarWallTagAutoLM1.BLUE_CELL_FIRST_TAG,
+                red ? FarWallTagAutoLM1.RED_CELL_LAST_TAG : FarWallTagAutoLM1.BLUE_CELL_LAST_TAG);
+    }
+
+    // True if the Limelight's latest fresh frame has a tag with an ID from first to last.
+    private boolean tagVisible(int first, int last) {
         LLResult result = limelight.getLatestResult();
         if (result == null || !result.isValid() || result.getStaleness() > TAG_MAX_STALENESS_MS) {
             return false;
